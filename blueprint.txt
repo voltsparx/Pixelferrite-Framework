@@ -1,0 +1,262 @@
+PixelFerrite Framework – Full Blueprint
+=======================================
+
+OVERVIEW
+--------
+PixelFerrite is a Metasploit-inspired **steganography research & lab framework**. 
+Its goal is to simulate payload embedding and network telemetry via images in a safe environment. 
+It supports multiple OS targets (Windows, Linux, macOS, Android, iOS, IoT) and provides analysis, 
+detection, and lab experimentation tools.
+
+PRIMARY COMPONENTS
+------------------
+1. pixelferrite: interactive console (Metasploit-style)
+2. pixelpoison: image payload packer & transformer
+3. module ecosystem: payloads, encoders, evasion, nops, detection, analysis, transports
+4. lab simulator: VM network lab builder, session simulator
+5. session manager: simulated telemetry sessions
+6. logging engine: framework logs, session logs, error logs
+7. temporary workspace: stores temp files, payload images, logs, datasets
+
+------------------------------------------------------------
+DIRECTORY STRUCTURE
+------------------------------------------------------------
+PixelFerrite/
+├── bin/
+│   ├── pixelferrite           # main console binary
+│   └── pixelpoison            # image payload packer & transformer
+│
+├── core/
+│   ├── console_engine.cpp
+│   ├── module_loader.cpp
+│   ├── plugin_loader.cpp
+│   ├── session_manager.cpp
+│   ├── network_simulator.cpp
+│   ├── image_engine.cpp
+│   ├── encoder_engine.cpp
+│   ├── evasion_engine.cpp
+│   ├── nop_engine.cpp
+│   ├── detection_engine.cpp
+│   ├── analysis_engine.cpp
+│   └── logger.cpp
+│
+├── include/
+│   ├── module.hpp
+│   ├── payload.hpp
+│   ├── session.hpp
+│   ├── transport.hpp
+│   ├── image.hpp
+│   ├── encoder.hpp
+│   ├── evasion.hpp
+│   ├── nop.hpp
+│   ├── detection.hpp
+│   ├── analysis.hpp
+│   └── logger.hpp
+│
+├── modules/
+│   ├── payloads/
+│   │   ├── windows/telemetry_win.cpp
+│   │   ├── linux/telemetry_linux.cpp
+│   │   ├── macos/telemetry_macos.cpp
+│   │   ├── android/telemetry_android.cpp
+│   │   ├── ios/telemetry_ios.cpp
+│   │   └── cross_platform/echo_payload.cpp
+│   │
+│   ├── encoders/ xor_encoder.cpp, base64_encoder.cpp, aes_encoder.cpp, polymorphic_encoder.cpp
+│   ├── evasion/ entropy_balancer.cpp, adaptive_lsb.cpp, metadata_camouflage.cpp
+│   ├── nops/ random_padding.cpp, image_noise_injection.cpp, metadata_noise.cpp
+│   ├── detection/ entropy_analyzer.cpp, lsb_pattern_detector.cpp, metadata_anomaly_scanner.cpp
+│   ├── analysis/ embedding_comparator.cpp, visual_heatmap.cpp, carrier_quality_score.cpp
+│   ├── transports/ http_simulated.cpp, dns_simulated.cpp, file_drop_simulated.cpp
+│   └── lab/ vm_setup_assistant.cpp, isolated_network_builder.cpp, safe_target_simulator.cpp
+│
+├── plugins/
+│   ├── third_party_modules/
+│   └── research_extensions/
+│
+├── labs/
+│   ├── network_simulations/
+│   ├── vm_guides/
+│   └── safe_scenarios/
+│
+├── temp/                        # workspace for payload images, logs, datasets, and lab simulations
+│   ├── payload_images/
+│   ├── datasets/
+│   └── logs/
+│
+├── docs/
+│   ├── architecture.md
+│   ├── module_dev.md
+│   ├── console_commands.md
+│   ├── lab_setup_guides.md
+│   └── ethical_use.md
+│
+└── tests/
+    ├── unit/
+    ├── integration/
+    └── sample_data/
+
+------------------------------------------------------------
+PLATFORM SUPPORT
+------------------------------------------------------------
+Supported platforms: windows, linux, macos, android, ios, embedded (IoT), cross_platform
+- Each module carries metadata indicating supported platform and arch
+- Platform filtering ensures only compatible modules are selectable
+
+------------------------------------------------------------
+CONSOLE COMMAND SYSTEM
+------------------------------------------------------------
+Global Commands:
+help, banner, version, exit/quit, clear, history
+
+Workspace Commands:
+workspace list, add <name>, select <name>, delete <name>
+
+Module Commands:
+search <keyword>, show modules/payloads/encoders/evasion/nops/transports/detection/analysis
+use <module_path>, back, info, show options, set <opt> <value>, unset <opt>, run, check
+
+Payload Workflow Commands:
+embed, extract, simulate, analyze, mutate
+
+Session Management Commands:
+sessions, sessions -i <id>, sessions -k <id>, sessions -K, sessions -l
+
+Logging & Reporting Commands:
+log show, log export <file>, report generate, report export <file>
+
+Dataset & Research Commands:
+dataset generate <n>, dataset analyze <dir>, dataset compare
+
+------------------------------------------------------------
+PIXELPOISON TOOL
+------------------------------------------------------------
+Purpose: pack payloads into images, transform, simulate delivery, and export for analysis
+
+Commands:
+embed --input img.png --payload payload.json
+extract --input img.png
+mutate --entropy-balance img.png
+dataset --generate <n>
+analyze --input img.png
+
+Outputs:
+- embedded images
+- extracted payload files
+- datasets for detection experiments
+- analysis reports
+
+------------------------------------------------------------
+MODULE CATEGORIES
+------------------------------------------------------------
+Payloads:
+- windows: telemetry_win, file_marker_win
+- linux: telemetry_linux, sysinfo_logger_linux
+- macos: telemetry_macos, file_marker_macos
+- android: telemetry_android, sensor_logger_android
+- ios: telemetry_ios_sim
+- cross_platform: echo_payload, json_telemetry
+
+Encoders:
+- xor_encoder, base64_encoder, aes_encoder, polymorphic_encoder
+
+Nops (Obfuscation Research):
+- random_padding, image_noise_injection, metadata_noise
+
+Evasion (Detection Simulation):
+- entropy_balancer, adaptive_lsb, metadata_camouflage, signature_randomizer
+
+Transports (Lab Simulated):
+- http_simulated, dns_simulated, file_drop_simulated
+
+Detection Modules:
+- entropy_analyzer, lsb_pattern_detector, metadata_anomaly_scanner
+
+Analysis Modules:
+- embedding_comparator, visual_heatmap, carrier_quality_score, capacity_estimator
+
+Lab Modules:
+- vm_setup_assistant, isolated_network_builder, safe_target_simulator
+
+------------------------------------------------------------
+PIPELINE & WORKFLOW
+------------------------------------------------------------
+1. Select Platform: set platform <windows/linux/android/etc>
+2. Select Payload: use payloads/<platform>/<payload_module>
+3. Set Options: set IMAGE <image_file>, set ENCODER <encoder>, set EVASION <module>, set NOP <module>, set TRANSPORT <simulated>
+4. Embed & Package: embed
+5. Simulate Delivery in Lab: simulate
+6. Session Logging: session created in temp/sessions/
+7. Analysis: analyze or extract
+8. Dataset Generation & Comparison: dataset generate <n>, dataset compare
+9. Plugin Extensions: load additional detection/analysis modules
+
+------------------------------------------------------------
+SESSION MODEL (SIMULATED)
+------------------------------------------------------------
+Fields:
+- session_id, host_label, platform, arch, last_seen, transport_used, log_path
+
+Actions:
+- view telemetry, export session data, generate analysis report
+
+------------------------------------------------------------
+LOGGING SYSTEM
+------------------------------------------------------------
+Log Types: framework.log, modules.log, sessions.log, errors.log
+Fields: timestamp, module, action, status, details
+
+------------------------------------------------------------
+ERROR HANDLING
+------------------------------------------------------------
+Classes: ModuleLoadError, ImageFormatError, PayloadFormatError, EncodingError, SimulationError
+Behavior:
+- isolate module failures
+- continue framework execution
+- log detailed diagnostics
+
+------------------------------------------------------------
+EXAMPLE OPERATOR FLOW
+------------------------------------------------------------
+pixelferrite > show platforms
+pixelferrite > set platform android
+pixelferrite > show payloads
+pixelferrite > use payloads/android/telemetry_android
+pixelferrite payload(telemetry_android) > set IMAGE cat.png
+pixelferrite payload(telemetry_android) > set ENCODER aes
+pixelferrite payload(telemetry_android) > set EVASION entropy_balancer
+pixelferrite payload(telemetry_android) > embed
+pixelferrite payload(telemetry_android) > simulate
+pixelferrite > sessions
+pixelferrite > analyze
+
+------------------------------------------------------------
+FUTURE EXPANSION
+------------------------------------------------------------
+- AI-assisted anomaly detection
+- ML-powered payload detection simulations
+- More platform-specific lab modules
+- Plugin-defined platforms, encoders, and evasion techniques
+- Visual dashboard for lab simulations and telemetry
+
+------------------------------------------------------------
+ETHICS & SAFETY
+------------------------------------------------------------
+- All payloads are research-safe simulations
+- Lab network must be isolated
+- Reverse-engineering real Metasploit or payloads is only for educational understanding
+- Framework encourages ethical security research, analysis, and learning
+
+------------------------------------------------------------
+TECH STACK
+------------------------------------------------------------
+- C++ core, single binary
+- OpenCV, libpng, libjpeg → image handling
+- Exiv2 → metadata
+- SQLite → logs & session DB
+- nlohmann/json → configuration & module metadata
+- Shared library plugin system for modules
+
+------------------------------------------------------------
+This blueprint mirrors Metasploit-style workflow and console UX, 
+cross-platform payload modules (simulated), pixelpoison packaging, session management, logging, detection, lab simulation, and plugin extensibility.
