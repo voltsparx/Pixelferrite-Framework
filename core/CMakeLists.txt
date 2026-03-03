@@ -10,6 +10,7 @@ add_library(pixelferrite_core
     src/logger.cpp
     src/module_loader.cpp
     src/nop_engine.cpp
+    src/path_verifier.cpp
     src/session_manager.cpp
 )
 
