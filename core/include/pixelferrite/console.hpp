@@ -23,6 +23,7 @@ private:
     bool handle_workspace(const std::vector<std::string>& tokens);
     bool handle_tools(const std::vector<std::string>& tokens);
     bool handle_scope(const std::vector<std::string>& tokens);
+    bool handle_verify(const std::vector<std::string>& tokens) const;
     bool handle_show(const std::vector<std::string>& tokens) const;
     bool handle_sessions(const std::vector<std::string>& tokens);
     bool handle_log(const std::vector<std::string>& tokens);

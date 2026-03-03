@@ -1,5 +1,6 @@
 #include <pixelferrite/module_loader.hpp>
 #include <pixelferrite/colors.hpp>
+#include <pixelferrite/path_verifier.hpp>
 
 #include <algorithm>
 #include <array>
@@ -143,6 +144,16 @@ std::filesystem::path default_artifact_path() {
     return runtime_data_root() / "workspace" / "default" / "tmp" / "pixelgen_artifact.json";
 }
 
+bool report_path_check(const pixelferrite::path_verifier::CheckResult& result) {
+    if (result.ok) {
+        return true;
+    }
+
+    std::cerr << pixelferrite::colors::wrap("Path verifier:", pixelferrite::colors::error())
+              << " " << pixelferrite::colors::wrap(result.detail, pixelferrite::colors::warning()) << '\n';
+    return false;
+}
+
 std::string resolve_modules_root(std::string modules_root) {
     const std::filesystem::path direct(modules_root);
     if (std::filesystem::exists(direct)) {
@@ -170,6 +181,42 @@ std::string resolve_modules_root(std::string modules_root) {
     }
 
     return modules_root;
+}
+
+bool verify_startup_paths(
+    const CliOptions& options,
+    const std::string& modules_root,
+    bool require_modules_root,
+    bool require_output_path
+) {
+    bool ok = true;
+    const std::filesystem::path data_root = runtime_data_root();
+    const std::filesystem::path workspace_root = data_root / "workspace" / "default";
+
+    ok = report_path_check(pixelferrite::path_verifier::ensure_directory(data_root, "pixelgen data root")) && ok;
+    ok = report_path_check(pixelferrite::path_verifier::ensure_directory(workspace_root, "pixelgen workspace root")) && ok;
+    ok = report_path_check(pixelferrite::path_verifier::ensure_directory(workspace_root / "tmp", "pixelgen workspace tmp")) && ok;
+    if (require_modules_root) {
+        ok = report_path_check(
+            pixelferrite::path_verifier::require_existing_directory(modules_root, "modules root")
+        ) && ok;
+    }
+
+    if (!options.input_image.empty()) {
+        ok = report_path_check(
+            pixelferrite::path_verifier::require_existing_file(options.input_image, "input image")
+        ) && ok;
+    }
+
+    if (require_output_path) {
+        const std::filesystem::path output_file =
+            options.output.empty() ? default_artifact_path() : std::filesystem::path(options.output);
+        ok = report_path_check(
+            pixelferrite::path_verifier::require_writable_file_path(output_file, "output artifact")
+        ) && ok;
+    }
+
+    return ok;
 }
 
 bool matches_target(const pixelferrite::ModuleDescriptor& module, const std::string& target) {
@@ -308,7 +355,14 @@ bool write_artifact(const CliOptions& options) {
     const std::filesystem::path output_file =
         options.output.empty() ? default_artifact_path() : std::filesystem::path(options.output);
     const std::string out_path = output_file.generic_string();
-    std::filesystem::create_directories(output_file.parent_path());
+
+    const auto writable =
+        pixelferrite::path_verifier::require_writable_file_path(output_file, "output artifact");
+    if (!writable.ok) {
+        std::cerr << pixelferrite::colors::wrap("Unable to write output file:", pixelferrite::colors::error())
+                  << " " << pixelferrite::colors::wrap(writable.detail, pixelferrite::colors::warning()) << '\n';
+        return false;
+    }
 
     std::ofstream out(output_file, std::ios::trunc);
     if (!out) {
@@ -376,8 +430,15 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    const std::string modules_root = resolve_modules_root("modules");
+    const bool requires_modules = options.list_target.empty() || options.list_target != "formats";
+    const bool requires_output_path = options.list_target.empty();
+    if (!verify_startup_paths(options, modules_root, requires_modules, requires_output_path)) {
+        return 1;
+    }
+
     pixelferrite::ModuleLoader loader;
-    const auto modules = loader.discover(resolve_modules_root("modules"));
+    const auto modules = loader.discover(modules_root);
 
     if (!options.list_target.empty()) {
         list_modules(modules, options.list_target);

@@ -30,6 +30,7 @@
 #include <pixelferrite/banner.hpp>
 #include <pixelferrite/colors.hpp>
 #include <pixelferrite/logger.hpp>
+#include <pixelferrite/path_verifier.hpp>
 
 namespace pixelferrite {
 
@@ -211,16 +212,28 @@ std::filesystem::path runtime_workspace_dataset_dir(std::string_view workspace) 
     return runtime_workspace_dir(workspace) / "datasets";
 }
 
-void ensure_workspace_layout(std::string_view workspace) {
-    std::filesystem::create_directories(runtime_logs_dir());
-    std::filesystem::create_directories(runtime_config_dir());
-    std::filesystem::create_directories(runtime_workspace_logs_dir(workspace));
-    std::filesystem::create_directories(runtime_workspace_reports_dir(workspace));
-    std::filesystem::create_directories(runtime_workspace_sessions_dir(workspace));
-    std::filesystem::create_directories(runtime_workspace_scripts_dir(workspace));
-    std::filesystem::create_directories(runtime_workspace_state_dir(workspace));
-    std::filesystem::create_directories(runtime_workspace_tmp_dir(workspace));
-    std::filesystem::create_directories(runtime_workspace_dataset_dir(workspace));
+bool report_path_check(const path_verifier::CheckResult& result) {
+    if (result.ok) {
+        return true;
+    }
+    std::cerr << err_msg("[-] path verifier") << " " << result.detail << '\n';
+    return false;
+}
+
+bool ensure_workspace_layout(std::string_view workspace) {
+    bool ok = true;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_data_root(), "runtime data root")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_logs_dir(), "runtime logs")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_config_dir(), "runtime config")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_root_dir(), "runtime workspace root")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_logs_dir(workspace), "workspace logs")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_reports_dir(workspace), "workspace reports")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_sessions_dir(workspace), "workspace sessions")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_scripts_dir(workspace), "workspace scripts")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_state_dir(workspace), "workspace state")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_tmp_dir(workspace), "workspace tmp")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_dataset_dir(workspace), "workspace datasets")) && ok;
+    return ok;
 }
 
 std::string resolve_modules_root(std::string modules_root) {
@@ -253,8 +266,27 @@ std::string resolve_modules_root(std::string modules_root) {
     return modules_root;
 }
 
-void ensure_runtime_layout() {
-    ensure_workspace_layout("default");
+bool ensure_runtime_layout() {
+    return ensure_workspace_layout("default");
+}
+
+bool verify_runtime_paths(std::string_view workspace, const std::filesystem::path& modules_root) {
+    bool ok = true;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_data_root(), "runtime data root")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_logs_dir(), "runtime logs")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_config_dir(), "runtime config")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_root_dir(), "runtime workspace root")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_dir(workspace), "workspace")) && ok;
+    ok = report_path_check(path_verifier::require_existing_directory(modules_root, "modules root")) && ok;
+    return ok;
+}
+
+bool verify_existing_input_file(const std::filesystem::path& path, std::string_view label) {
+    return report_path_check(path_verifier::require_existing_file(path, label));
+}
+
+bool verify_writable_output_file(const std::filesystem::path& path, std::string_view label) {
+    return report_path_check(path_verifier::require_writable_file_path(path, label));
 }
 
 void log_framework_line(const std::string& message) {
@@ -568,11 +600,16 @@ std::string run_ping_probe(const std::vector<std::string>& targets) {
 }  // namespace
 
 ConsoleEngine::ConsoleEngine(std::string modules_root)
-    : modules_root_(resolve_modules_root(std::move(modules_root))),
-      modules_(module_loader_.discover(modules_root_)) {
+    : modules_root_(resolve_modules_root(std::move(modules_root))) {
     colors::initialize();
+    const bool paths_ok = verify_runtime_paths(active_workspace_, modules_root_);
+    if (!paths_ok) {
+        std::cout << warn_msg("[*] runtime path verification reported issues; some features may be unavailable.") << '\n';
+    }
+
     ensure_runtime_layout();
     ensure_workspace_layout(active_workspace_);
+    modules_ = module_loader_.discover(modules_root_);
     allowed_tools_by_workspace_[active_workspace_] = {"nmap", "netprobe-rs"};
     denied_tools_by_workspace_[active_workspace_] = {};
 }
@@ -684,6 +721,9 @@ bool ConsoleEngine::handle_command(const std::string& line) {
     }
     if (command == "scope") {
         return handle_scope(tokens);
+    }
+    if (command == "verify") {
+        return handle_verify(tokens);
     }
     if (command == "show") {
         return handle_show(tokens);
@@ -872,7 +912,9 @@ bool ConsoleEngine::handle_workspace(const std::vector<std::string>& tokens) {
             return true;
         }
         workspaces_.push_back(name);
-        ensure_workspace_layout(name);
+        if (!ensure_workspace_layout(name)) {
+            std::cout << "[-] workspace path setup failed: " << name << '\n';
+        }
         allowed_tools_by_workspace_[name] = {"nmap", "netprobe-rs"};
         denied_tools_by_workspace_[name] = {};
         std::cout << "[+] Workspace added: " << name << '\n';
@@ -891,7 +933,9 @@ bool ConsoleEngine::handle_workspace(const std::vector<std::string>& tokens) {
         if (denied_tools_by_workspace_.find(name) == denied_tools_by_workspace_.end()) {
             denied_tools_by_workspace_[name] = {};
         }
-        ensure_workspace_layout(name);
+        if (!ensure_workspace_layout(name)) {
+            std::cout << "[-] workspace path setup failed: " << name << '\n';
+        }
         std::cout << "[*] Active workspace: " << name << '\n';
         return true;
     }
@@ -1065,6 +1109,31 @@ bool ConsoleEngine::handle_scope(const std::vector<std::string>& tokens) {
 
     std::cout << "[-] Unsupported scope action: " << action << '\n';
     return false;
+}
+
+bool ConsoleEngine::handle_verify(const std::vector<std::string>& tokens) const {
+    if (tokens.size() < 2 || to_lower(tokens[1]) != "paths") {
+        std::cout << "Usage: verify paths\n";
+        return true;
+    }
+
+    bool ok = true;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_data_root(), "runtime data root")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_logs_dir(), "runtime logs")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_config_dir(), "runtime config")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_root_dir(), "runtime workspace root")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_dir(active_workspace_), "active workspace root")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_reports_dir(active_workspace_), "active workspace reports")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_sessions_dir(active_workspace_), "active workspace sessions")) && ok;
+    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_tmp_dir(active_workspace_), "active workspace tmp")) && ok;
+    ok = report_path_check(path_verifier::require_existing_directory(modules_root_, "modules root")) && ok;
+
+    if (ok) {
+        std::cout << "[+] path verification passed.\n";
+    } else {
+        std::cout << "[-] path verification failed. review errors above.\n";
+    }
+    return ok;
 }
 
 bool ConsoleEngine::handle_show(const std::vector<std::string>& tokens) const {
@@ -1249,7 +1318,11 @@ bool ConsoleEngine::handle_log(const std::vector<std::string>& tokens) {
             return true;
         }
 
-        const std::string file_path = tokens[2];
+        const std::filesystem::path file_path = tokens[2];
+        if (!verify_writable_output_file(file_path, "log export file")) {
+            return true;
+        }
+
         std::ofstream output(file_path, std::ios::trunc);
         if (!output) {
             std::cout << "[-] Unable to write log export.\n";
@@ -1260,7 +1333,7 @@ bool ConsoleEngine::handle_log(const std::vector<std::string>& tokens) {
         output << "[sessions.log]\n" << read_text_file(runtime_logs_dir() / "sessions.log") << '\n';
         output << "[errors.log]\n" << read_text_file(runtime_logs_dir() / "errors.log") << '\n';
 
-        std::cout << "[+] Logs exported to " << file_path << '\n';
+        std::cout << "[+] Logs exported to " << file_path.generic_string() << '\n';
         return true;
     }
 
@@ -1277,6 +1350,9 @@ bool ConsoleEngine::handle_report(const std::vector<std::string>& tokens) {
     const std::string action = to_lower(tokens[1]);
     if (action == "generate") {
         const std::filesystem::path report_path = runtime_workspace_reports_dir(active_workspace_) / "latest_report.txt";
+        if (!verify_writable_output_file(report_path, "workspace report file")) {
+            return true;
+        }
         std::ofstream output(report_path, std::ios::trunc);
         if (!output) {
             std::cout << "[-] Unable to generate report.\n";
@@ -1306,13 +1382,18 @@ bool ConsoleEngine::handle_report(const std::vector<std::string>& tokens) {
             return true;
         }
 
-        std::ofstream output(tokens[2], std::ios::trunc);
+        const std::filesystem::path out_path = tokens[2];
+        if (!verify_writable_output_file(out_path, "report export file")) {
+            return true;
+        }
+
+        std::ofstream output(out_path, std::ios::trunc);
         if (!output) {
             std::cout << "[-] Unable to write report export.\n";
             return true;
         }
         output << source;
-        std::cout << "[+] Report exported to " << tokens[2] << '\n';
+        std::cout << "[+] Report exported to " << out_path.generic_string() << '\n';
         return true;
     }
 
@@ -1480,6 +1561,10 @@ bool ConsoleEngine::handle_resource(const std::vector<std::string>& tokens) {
     }
 
     const std::filesystem::path resource_file = tokens[1];
+    if (!verify_existing_input_file(resource_file, "resource script")) {
+        return true;
+    }
+
     std::ifstream input(resource_file);
     if (!input) {
         std::cout << "[-] Unable to open resource file: " << resource_file.generic_string() << '\n';
@@ -1512,7 +1597,9 @@ bool ConsoleEngine::handle_makerc(const std::vector<std::string>& tokens) {
             ? std::filesystem::path(tokens[1])
             : runtime_workspace_scripts_dir(active_workspace_) / "pffconsole.rc";
 
-    std::filesystem::create_directories(out_file.parent_path());
+    if (!verify_writable_output_file(out_file, "rc output file")) {
+        return true;
+    }
     std::ofstream output(out_file, std::ios::trunc);
     if (!output) {
         std::cout << "[-] Unable to write rc file: " << out_file.generic_string() << '\n';
@@ -1532,7 +1619,9 @@ bool ConsoleEngine::handle_save(const std::vector<std::string>& tokens) {
             ? std::filesystem::path(tokens[1])
             : runtime_workspace_state_dir(active_workspace_) / "console_state.txt";
 
-    std::filesystem::create_directories(out_file.parent_path());
+    if (!verify_writable_output_file(out_file, "state output file")) {
+        return true;
+    }
     std::ofstream output(out_file, std::ios::trunc);
     if (!output) {
         std::cout << "[-] Unable to write state file: " << out_file.generic_string() << '\n';
@@ -1580,7 +1669,11 @@ bool ConsoleEngine::handle_spool(const std::vector<std::string>& tokens) {
                           ? std::filesystem::path(tokens[2])
                           : runtime_workspace_logs_dir(active_workspace_) /
                                 ("spool_" + compact_timestamp() + ".log");
-        std::filesystem::create_directories(spool_file_.parent_path());
+        if (!verify_writable_output_file(spool_file_, "spool output file")) {
+            spool_file_.clear();
+            spool_enabled_ = false;
+            return true;
+        }
         spool_enabled_ = true;
         append_spool_line("# spool started " + now_string("%Y-%m-%d %H:%M:%S"));
         std::cout << "[+] spool started: " << spool_file_.generic_string() << '\n';
@@ -2160,7 +2253,7 @@ std::string ConsoleEngine::prompt() const {
 void ConsoleEngine::print_help() const {
     std::cout
         << hdr("Core:") << '\n'
-        << "  help, banner, version, clear, history, exit, quit\n"
+        << "  help, banner, version, clear, history, verify paths, exit, quit\n"
         << hdr("Workspace:") << '\n'
         << "  workspace list|add <name>|select <name>|delete <name>\n"
         << hdr("Tools policy:") << '\n'
