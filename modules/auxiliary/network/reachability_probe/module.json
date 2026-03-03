@@ -1,0 +1,21 @@
+{
+  "id": "auxiliary/network/reachability_probe",
+  "name": "Reachability Probe",
+  "category": "auxiliary",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [
+    {
+      "name": "RHOSTS",
+      "description": "IPv4/IPv6 targets, comma separated.",
+      "required": true
+    }
+  ],
+  "safety_level": "authorized_assessment_only"
+}

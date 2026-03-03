@@ -1,0 +1,15 @@
+{
+  "id": "auxiliary/vm/hypervisor_inventory",
+  "name": "Hypervisor Inventory",
+  "category": "auxiliary",
+  "supported_platforms": [
+    "windows"
+  ],
+  "supported_arch": [
+    "x64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [],
+  "safety_level": "authorized_assessment_only"
+}

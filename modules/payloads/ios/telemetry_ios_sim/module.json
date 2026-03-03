@@ -1,0 +1,15 @@
+{
+  "id": "payloads/ios/telemetry_ios_sim",
+  "name": "Telemetry iOS Sim",
+  "category": "payload",
+  "supported_platforms": [
+    "ios"
+  ],
+  "supported_arch": [
+    "arm64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.1.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

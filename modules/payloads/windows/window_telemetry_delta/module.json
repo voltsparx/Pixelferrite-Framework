@@ -1,0 +1,15 @@
+{
+  "id": "payloads/windows/window_telemetry_delta",
+  "name": "Window Telemetry Delta",
+  "category": "payload",
+  "supported_platforms": [
+    "windows"
+  ],
+  "supported_arch": [
+    "x64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.1.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

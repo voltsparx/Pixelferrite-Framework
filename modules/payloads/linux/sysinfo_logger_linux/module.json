@@ -1,0 +1,16 @@
+{
+  "id": "payloads/linux/sysinfo_logger_linux",
+  "name": "Sysinfo Logger Linux",
+  "category": "payload",
+  "supported_platforms": [
+    "linux"
+  ],
+  "supported_arch": [
+    "x64",
+    "arm64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.1.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

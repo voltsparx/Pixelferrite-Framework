@@ -1,0 +1,7 @@
+framework:
+  name: PixelFerrite
+  version: 0.1.0
+  modules_root: modules
+  plugins_root: plugins
+  data_root: data
+  safety_mode: simulation_only

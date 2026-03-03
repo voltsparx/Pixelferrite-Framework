@@ -1,0 +1,21 @@
+{
+  "id": "encoders/stream_cipher_encoder",
+  "name": "Stream Cipher Encoder",
+  "category": "encoder",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [
+    {
+      "name": "KEY",
+      "description": "Encoding key material.",
+      "required": true
+    }
+  ],
+  "safety_level": "authorized_assessment_only"
+}

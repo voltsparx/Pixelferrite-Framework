@@ -1,0 +1,15 @@
+{
+  "id": "nops/luma_noise_spread",
+  "name": "Luma Noise Spread",
+  "category": "nop",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [],
+  "safety_level": "authorized_assessment_only"
+}

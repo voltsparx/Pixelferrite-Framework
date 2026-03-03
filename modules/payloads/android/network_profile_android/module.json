@@ -1,0 +1,21 @@
+{
+  "id": "payloads/android/network_profile_android",
+  "name": "Network Profile Android",
+  "category": "payload",
+  "supported_platforms": [
+    "android"
+  ],
+  "supported_arch": [
+    "arm64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [
+    {
+      "name": "RHOSTS",
+      "description": "ADB-connected target list.",
+      "required": false
+    }
+  ],
+  "safety_level": "authorized_assessment_only"
+}

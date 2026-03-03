@@ -1,0 +1,15 @@
+{
+  "id": "nops/random_padding",
+  "name": "Random Padding",
+  "category": "nop",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.1.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

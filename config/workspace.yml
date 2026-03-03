@@ -1,0 +1,6 @@
+workspace:
+  default: default
+  active: default
+  temp_root: tmp
+  reports_root: var/reports
+  sessions_root: var/sessions

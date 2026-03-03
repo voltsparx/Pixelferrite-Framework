@@ -1,0 +1,15 @@
+{
+  "id": "payloads/android/sensor_logger_android",
+  "name": "Sensor Logger Android",
+  "category": "payload",
+  "supported_platforms": [
+    "android"
+  ],
+  "supported_arch": [
+    "arm64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.1.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

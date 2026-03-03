@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PixelFerrite Module Manifest",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "category",
+    "supported_platforms",
+    "supported_arch",
+    "author",
+    "version",
+    "options",
+    "safety_level"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "category": { "type": "string" },
+    "supported_platforms": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "supported_arch": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "author": { "type": "string" },
+    "version": { "type": "string" },
+    "options": { "type": "array" },
+    "safety_level": { "type": "string" }
+  }
+}

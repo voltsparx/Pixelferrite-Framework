@@ -1,0 +1,15 @@
+{
+  "id": "encoders/block_permute_encoder",
+  "name": "Block Permute Encoder",
+  "category": "encoder",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [],
+  "safety_level": "authorized_assessment_only"
+}

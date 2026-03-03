@@ -1,0 +1,17 @@
+{
+  "id": "payloads/cross_platform/network_service_snapshot",
+  "name": "Network Service Snapshot",
+  "category": "payload",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "x64",
+    "x86",
+    "arm64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

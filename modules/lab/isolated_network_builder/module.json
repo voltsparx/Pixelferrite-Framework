@@ -1,0 +1,15 @@
+{
+  "id": "lab/isolated_network_builder",
+  "name": "Isolated Network Builder",
+  "category": "lab",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.1.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

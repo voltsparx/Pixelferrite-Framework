@@ -1,0 +1,31 @@
+{
+  "id": "auxiliary/network/dualstack_connectivity_audit",
+  "name": "Dualstack Connectivity Audit",
+  "category": "auxiliary",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [
+    {
+      "name": "RHOST",
+      "description": "IPv4 target.",
+      "required": false
+    },
+    {
+      "name": "RHOST6",
+      "description": "IPv6 target.",
+      "required": false
+    },
+    {
+      "name": "RHOSTS",
+      "description": "Target list.",
+      "required": false
+    }
+  ],
+  "safety_level": "authorized_assessment_only"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "lab/dualstack_lab_topology_validator",
+  "name": "Dualstack Lab Topology Validator",
+  "category": "lab",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [],
+  "safety_level": "authorized_assessment_only"
+}

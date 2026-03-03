@@ -1,0 +1,15 @@
+{
+  "id": "evasion/block_boundary_smear",
+  "name": "Block Boundary Smear",
+  "category": "evasion",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [],
+  "safety_level": "authorized_assessment_only"
+}

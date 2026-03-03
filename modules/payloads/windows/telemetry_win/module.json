@@ -1,0 +1,16 @@
+{
+  "id": "payloads/windows/telemetry_win",
+  "name": "Telemetry Windows",
+  "category": "payload",
+  "supported_platforms": [
+    "windows"
+  ],
+  "supported_arch": [
+    "x64",
+    "x86"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.1.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

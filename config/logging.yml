@@ -1,0 +1,7 @@
+logging:
+  level: info
+  sinks:
+    - file: var/logs/framework.log
+    - file: var/logs/modules.log
+    - file: var/logs/sessions.log
+    - file: var/logs/errors.log

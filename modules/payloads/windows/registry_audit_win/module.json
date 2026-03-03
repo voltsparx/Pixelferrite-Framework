@@ -1,0 +1,22 @@
+{
+  "id": "payloads/windows/registry_audit_win",
+  "name": "Registry Audit Windows",
+  "category": "payload",
+  "supported_platforms": [
+    "windows"
+  ],
+  "supported_arch": [
+    "x64",
+    "x86"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [
+    {
+      "name": "RHOSTS",
+      "description": "Optional target host list.",
+      "required": false
+    }
+  ],
+  "safety_level": "authorized_assessment_only"
+}

@@ -1,0 +1,15 @@
+third-party-temp/
+banner.txt
+
+# Build output
+build/
+build-*/
+out/
+
+# Runtime artifacts
+tmp/
+var/
+
+# Local editor state
+.vscode/*
+!.vscode/settings.json

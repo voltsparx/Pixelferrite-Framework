@@ -1,0 +1,18 @@
+{
+  "id": "auxiliary/device_info/cpu_memory_profile",
+  "name": "CPU Memory Profile",
+  "category": "auxiliary",
+  "supported_platforms": [
+    "windows",
+    "linux",
+    "macos"
+  ],
+  "supported_arch": [
+    "x64",
+    "arm64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [],
+  "safety_level": "authorized_assessment_only"
+}

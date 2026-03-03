@@ -1,0 +1,22 @@
+{
+  "id": "payloads/macos/installer_receipts_macos",
+  "name": "Installer Receipts macOS",
+  "category": "payload",
+  "supported_platforms": [
+    "macos"
+  ],
+  "supported_arch": [
+    "x64",
+    "arm64"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [
+    {
+      "name": "RHOSTS",
+      "description": "Target host list.",
+      "required": false
+    }
+  ],
+  "safety_level": "authorized_assessment_only"
+}

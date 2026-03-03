@@ -1,0 +1,16 @@
+{
+  "id": "payloads/android/telemetry_android",
+  "name": "Telemetry Android",
+  "category": "payload",
+  "supported_platforms": [
+    "android"
+  ],
+  "supported_arch": [
+    "arm64",
+    "armv7"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.1.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}

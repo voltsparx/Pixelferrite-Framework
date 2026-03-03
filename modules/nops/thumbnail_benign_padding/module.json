@@ -1,0 +1,15 @@
+{
+  "id": "nops/thumbnail_benign_padding",
+  "name": "Thumbnail Benign Padding",
+  "category": "nop",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [],
+  "safety_level": "simulation_only"
+}
