@@ -23,6 +23,7 @@ private:
     bool handle_workspace(const std::vector<std::string>& tokens);
     bool handle_tools(const std::vector<std::string>& tokens);
     bool handle_scope(const std::vector<std::string>& tokens);
+    bool handle_explain(const std::vector<std::string>& tokens) const;
     bool handle_verify(const std::vector<std::string>& tokens) const;
     bool handle_show(const std::vector<std::string>& tokens) const;
     bool handle_sessions(const std::vector<std::string>& tokens);
@@ -96,6 +97,8 @@ private:
     int resource_depth_ = 0;
     bool enforce_scope_ = false;
     bool running_ = true;
+    std::string last_explain_summary_;
+    std::vector<std::string> last_explain_lines_;
 };
 
 }  // namespace pixelferrite

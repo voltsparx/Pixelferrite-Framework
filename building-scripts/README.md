@@ -1,6 +1,6 @@
 # Building Scripts
 
-This directory contains platform-oriented helpers:
+This directory contains platform install/build helpers for PixelFerrite:
 
 - `install-linux.sh`
 - `install-macos.sh`
@@ -15,7 +15,7 @@ The installers now follow a self-contained framework root:
 - binaries/assets/modules stay inside a dedicated framework folder
 - runtime writable data always goes to per-user locations
 
-Installed layout:
+Installed framework layout:
 
 - `bin/` (`pixelferrite`, `pffconsole`, `pixelgen`)
 - `modules/`
@@ -25,7 +25,8 @@ Installed layout:
 - `config/default.conf`
 - `version.txt`
 
-Note: optional directories (`payloads`, `lib`, `resources`, `logs`) are only created when populated by installer inputs.
+Note: optional framework directories (`payloads`, `lib`, `resources`) are only created when populated by installer inputs.
+Runtime logs are written to user data locations, not the immutable install root.
 
 ## Platform Paths
 
@@ -72,5 +73,11 @@ Linux -> Windows cross-build:
 ```bash
 bash building-scripts/build-windows-from-linux.sh
 ```
+
+## Related Docs
+
+- Root overview: [`../README.md`](../README.md)
+- Architecture: [`../docs/architecture.md`](../docs/architecture.md)
+- Console reference: [`../docs/console_commands.md`](../docs/console_commands.md)
 
 

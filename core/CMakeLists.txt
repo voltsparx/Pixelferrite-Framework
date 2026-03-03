@@ -5,6 +5,7 @@ add_library(pixelferrite_core
     src/console.cpp
     src/detection_engine.cpp
     src/encoder_engine.cpp
+    src/explain_engine.cpp
     src/evasion_engine.cpp
     src/image_engine.cpp
     src/logger.cpp
@@ -12,6 +13,7 @@ add_library(pixelferrite_core
     src/nop_engine.cpp
     src/path_verifier.cpp
     src/session_manager.cpp
+    src/simulation_engine.cpp
 )
 
 target_include_directories(pixelferrite_core

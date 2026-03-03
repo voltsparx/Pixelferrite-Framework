@@ -13,6 +13,9 @@ struct SessionInfo {
     std::string local_bind;
     std::string platform;
     std::string transport_used;
+    std::string simulation_profile;
+    int quality_score = 0;
+    int detection_risk = 0;
 };
 
 class SessionManager {

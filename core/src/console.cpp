@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -29,8 +30,11 @@
 
 #include <pixelferrite/banner.hpp>
 #include <pixelferrite/colors.hpp>
+#include <pixelferrite/explain_engine.hpp>
+#include <pixelferrite/image_engine.hpp>
 #include <pixelferrite/logger.hpp>
 #include <pixelferrite/path_verifier.hpp>
+#include <pixelferrite/simulation_engine.hpp>
 
 namespace pixelferrite {
 
@@ -389,14 +393,62 @@ std::vector<std::string> split_targets(const std::string& raw) {
     return targets;
 }
 
-std::string detect_ip_version(const std::string& endpoint) {
-    if (endpoint.find(':') != std::string::npos) {
-        return "ipv6";
+bool is_ipv4_literal(const std::string& endpoint) {
+    static const std::regex kIpv4Pattern(R"(^(\d{1,3})(\.(\d{1,3})){3}$)");
+    if (!std::regex_match(endpoint, kIpv4Pattern)) {
+        return false;
     }
-    if (endpoint.find('.') != std::string::npos) {
-        return "ipv4";
+
+    std::stringstream input(endpoint);
+    std::string segment;
+    while (std::getline(input, segment, '.')) {
+        try {
+            const int octet = std::stoi(segment);
+            if (octet < 0 || octet > 255) {
+                return false;
+            }
+        } catch (...) {
+            return false;
+        }
     }
-    return "label";
+    return true;
+}
+
+bool is_ipv6_literal(std::string endpoint) {
+    if (endpoint.empty()) {
+        return false;
+    }
+
+    if (endpoint.front() == '[') {
+        const std::size_t end = endpoint.find(']');
+        if (end == std::string::npos) {
+            return false;
+        }
+        endpoint = endpoint.substr(1, end - 1);
+    }
+
+    if (endpoint.find(':') == std::string::npos) {
+        return false;
+    }
+
+    static const std::regex kIpv6LoosePattern(R"(^[0-9A-Fa-f:]+$)");
+    return std::regex_match(endpoint, kIpv6LoosePattern);
+}
+
+bool is_hostname_label(const std::string& endpoint) {
+    if (endpoint.empty()) {
+        return false;
+    }
+    static const std::regex kHostPattern(R"(^[A-Za-z0-9][A-Za-z0-9\.-]{0,252}$)");
+    return std::regex_match(endpoint, kHostPattern);
+}
+
+bool is_valid_target_value(const std::string& endpoint) {
+    return is_ipv4_literal(endpoint) || is_ipv6_literal(endpoint) || is_hostname_label(endpoint);
+}
+
+bool creates_session_category(const std::string& category) {
+    return category == "payload" || category == "exploit";
 }
 
 std::string get_option_value(
@@ -415,6 +467,23 @@ std::string get_option_value(
     }
 
     return {};
+}
+
+int option_as_int(
+    const std::unordered_map<std::string, std::string>& local_options,
+    const std::unordered_map<std::string, std::string>& global_options,
+    const std::string& key,
+    int default_value
+) {
+    const std::string raw = get_option_value(local_options, global_options, key);
+    if (raw.empty()) {
+        return default_value;
+    }
+    try {
+        return std::stoi(raw);
+    } catch (...) {
+        return default_value;
+    }
 }
 
 std::vector<std::string> find_missing_required_options(
@@ -721,6 +790,9 @@ bool ConsoleEngine::handle_command(const std::string& line) {
     }
     if (command == "scope") {
         return handle_scope(tokens);
+    }
+    if (command == "explain") {
+        return handle_explain(tokens);
     }
     if (command == "verify") {
         return handle_verify(tokens);
@@ -1111,6 +1183,30 @@ bool ConsoleEngine::handle_scope(const std::vector<std::string>& tokens) {
     return false;
 }
 
+bool ConsoleEngine::handle_explain(const std::vector<std::string>& tokens) const {
+    const std::string mode = (tokens.size() >= 2) ? to_lower(tokens[1]) : "last";
+    if (mode != "last" && mode != "summary") {
+        std::cout << "Usage: explain [last|summary]\n";
+        return true;
+    }
+
+    if (last_explain_summary_.empty() && last_explain_lines_.empty()) {
+        std::cout << "[-] No explanation available yet. Run 'check', 'run', or 'simulate' first.\n";
+        return true;
+    }
+
+    if (mode == "summary") {
+        std::cout << "[*] " << last_explain_summary_ << '\n';
+        return true;
+    }
+
+    std::cout << "[*] " << last_explain_summary_ << '\n';
+    for (const std::string& line : last_explain_lines_) {
+        std::cout << "  - " << line << '\n';
+    }
+    return true;
+}
+
 bool ConsoleEngine::handle_verify(const std::vector<std::string>& tokens) const {
     if (tokens.size() < 2 || to_lower(tokens[1]) != "paths") {
         std::cout << "Usage: verify paths\n";
@@ -1220,7 +1316,11 @@ bool ConsoleEngine::handle_show(const std::vector<std::string>& tokens) const {
             std::cout << "  " << session.session_id << "  " << session.host_label
                       << "  " << session.ip_version
                       << "  " << session.platform << "  " << session.transport_used
-                      << "  " << session.local_bind << '\n';
+                      << "  " << session.local_bind
+                      << "  profile=" << session.simulation_profile
+                      << "  quality=" << session.quality_score
+                      << "  risk=" << session.detection_risk
+                      << '\n';
         }
         return true;
     }
@@ -1940,27 +2040,198 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
 
     std::cout << "[*] " << action << " => " << active_module_ << '\n';
     const ModuleDescriptor active_descriptor = module_loader_.find_by_id(modules_, active_module_);
+    if (active_descriptor.id.empty()) {
+        std::cout << "[-] Active module manifest unavailable.\n";
+        return true;
+    }
+
+    if (action == "embed" || action == "extract") {
+        ImageEngine image_engine;
+        std::string image_path_raw = get_option_value(active_options_, global_options_, "IMAGE");
+        if (image_path_raw.empty()) {
+            image_path_raw = get_option_value(active_options_, global_options_, "INPUT");
+        }
+        if (image_path_raw.empty()) {
+            std::cout << "[-] Missing IMAGE option. Example: set IMAGE C:/path/to/carrier.png\n";
+            return true;
+        }
+
+        const std::filesystem::path image_path = std::filesystem::path(image_path_raw);
+        if (!verify_existing_input_file(image_path, "carrier image")) {
+            return true;
+        }
+        if (!image_engine.supports_format(image_path)) {
+            std::cout << "[-] Unsupported format for safe simulation embedding. Supported: "
+                      << image_engine.supported_extensions() << '\n';
+            return true;
+        }
+
+        if (action == "embed") {
+            std::filesystem::path out_path = std::filesystem::path(
+                get_option_value(active_options_, global_options_, "OUTFILE")
+            );
+            if (out_path.empty()) {
+                out_path = std::filesystem::path(get_option_value(active_options_, global_options_, "OUTPUT"));
+            }
+            if (out_path.empty()) {
+                out_path =
+                    runtime_workspace_tmp_dir(active_workspace_) /
+                    (image_path.stem().string() + "_embedded" + image_path.extension().string());
+            }
+            if (out_path.lexically_normal() == image_path.lexically_normal()) {
+                std::cout << "[-] OUTFILE must be different from IMAGE to prevent overwrite.\n";
+                return true;
+            }
+            if (!verify_writable_output_file(out_path, "embedded image output")) {
+                return true;
+            }
+
+            std::string sim_code = get_option_value(active_options_, global_options_, "SIMCODE");
+            if (sim_code.empty()) {
+                sim_code =
+                    "module=" + active_module_ +
+                    ";mode=simulation_only;ts=" + now_string("%Y-%m-%d %H:%M:%S");
+            }
+
+            const ImageEmbedReport report = image_engine.embed_simulation_code(image_path, out_path, sim_code);
+            if (!report.success) {
+                std::cout << "[-] embed failed: " << report.message << '\n';
+                return true;
+            }
+
+            std::cout << "[+] embed complete: " << out_path.generic_string() << '\n';
+            std::cout << "[*] format=" << report.format
+                      << " integrity=" << (report.integrity_ok ? "ok" : "failed")
+                      << " size_in=" << report.input_size
+                      << " size_out=" << report.output_size << '\n';
+
+            last_explain_summary_ =
+                "embed format=" + report.format +
+                " integrity=" + (report.integrity_ok ? std::string("ok") : std::string("failed"));
+            last_explain_lines_.clear();
+            last_explain_lines_.push_back("input=" + image_path.generic_string());
+            last_explain_lines_.push_back("output=" + out_path.generic_string());
+            last_explain_lines_.push_back("marker=simulation metadata trailer/comment");
+            return true;
+        }
+
+        const ImageExtractReport extract = image_engine.extract_simulation_code(image_path);
+        if (!extract.success) {
+            std::cout << "[-] extract failed: " << extract.message << '\n';
+            return true;
+        }
+
+        std::cout << "[+] extract complete: format=" << extract.format << '\n';
+        std::cout << extract.simulation_code << '\n';
+
+        std::filesystem::path out_path = std::filesystem::path(
+            get_option_value(active_options_, global_options_, "EXTRACT_OUT")
+        );
+        if (!out_path.empty()) {
+            if (out_path.lexically_normal() == image_path.lexically_normal()) {
+                std::cout << "[-] EXTRACT_OUT cannot be the same as IMAGE.\n";
+                return true;
+            }
+            if (!verify_writable_output_file(out_path, "extract output file")) {
+                return true;
+            }
+            std::ofstream out(out_path, std::ios::trunc);
+            if (!out) {
+                std::cout << "[-] unable to write extract output file.\n";
+                return true;
+            }
+            out << extract.simulation_code << '\n';
+            std::cout << "[*] extracted simulation code saved: " << out_path.generic_string() << '\n';
+        }
+
+        last_explain_summary_ = "extract format=" + extract.format + " status=ok";
+        last_explain_lines_.clear();
+        last_explain_lines_.push_back("input=" + image_path.generic_string());
+        last_explain_lines_.push_back("decoded_length=" + std::to_string(extract.simulation_code.size()));
+        return true;
+    }
+
     const std::vector<std::string> missing_required =
         find_missing_required_options(active_descriptor, active_options_, global_options_);
 
-    if (action == "check") {
-        const std::string rhosts = get_option_value(active_options_, global_options_, "RHOSTS");
-        const std::string rhost = get_option_value(active_options_, global_options_, "RHOST");
-        const std::string rhost6 = get_option_value(active_options_, global_options_, "RHOST6");
+    const std::string transport = [&] {
+        const std::string configured = get_option_value(active_options_, global_options_, "TRANSPORT");
+        return configured.empty() ? "http_simulated" : configured;
+    }();
 
-        std::vector<std::string> targets;
-        if (!rhosts.empty()) {
-            targets = split_targets(rhosts);
-        } else if (!rhost.empty()) {
-            targets.push_back(rhost);
-        } else if (!rhost6.empty()) {
-            targets.push_back(rhost6);
-        } else {
-            targets.push_back("lab-node-auto");
+    std::vector<std::string> requested_targets;
+    const std::string rhosts = get_option_value(active_options_, global_options_, "RHOSTS");
+    const std::string rhost = get_option_value(active_options_, global_options_, "RHOST");
+    const std::string rhost6 = get_option_value(active_options_, global_options_, "RHOST6");
+
+    if (!rhosts.empty()) {
+        requested_targets = split_targets(rhosts);
+    }
+    if (!rhost.empty() &&
+        std::find(requested_targets.begin(), requested_targets.end(), rhost) == requested_targets.end()) {
+        requested_targets.push_back(rhost);
+    }
+    if (!rhost6.empty() &&
+        std::find(requested_targets.begin(), requested_targets.end(), rhost6) == requested_targets.end()) {
+        requested_targets.push_back(rhost6);
+    }
+    if (requested_targets.empty()) {
+        requested_targets.push_back("lab-node-auto");
+    }
+
+    std::vector<std::string> sanitized_targets;
+    for (const std::string& target : requested_targets) {
+        if (!is_valid_target_value(target)) {
+            std::cout << "[-] invalid target format skipped: " << target << '\n';
+            continue;
         }
+        sanitized_targets.push_back(target);
+    }
+    if (sanitized_targets.empty()) {
+        std::cout << "[-] no valid targets available for simulation.\n";
+        return true;
+    }
 
+    std::vector<std::string> effective_targets;
+    for (const std::string& target : sanitized_targets) {
+        if (enforce_scope_ && !is_target_in_scope(allowed_targets_, target)) {
+            std::cout << "[-] blocked by scope policy: " << target << '\n';
+            continue;
+        }
+        effective_targets.push_back(target);
+    }
+
+    if (effective_targets.empty()) {
+        std::cout << "[-] no eligible targets after scope checks.\n";
+        return true;
+    }
+
+    SimulationEngine simulation_engine;
+    ExplainEngine explain_engine;
+    SimulationPlan sim_plan;
+    sim_plan.action = action;
+    sim_plan.module_id = active_descriptor.id;
+    sim_plan.category = active_descriptor.category;
+    sim_plan.platform = active_platform_;
+    sim_plan.transport = transport;
+    sim_plan.targets = effective_targets;
+    sim_plan.scope_enforced = enforce_scope_;
+    sim_plan.intensity = option_as_int(active_options_, global_options_, "INTENSITY", 72);
+
+    const SimulationOutcome sim_outcome = simulation_engine.run(active_descriptor, sim_plan);
+    const ExplainRequest explain_request{
+        active_descriptor,
+        sim_plan,
+        sim_outcome,
+        missing_required,
+        enforce_scope_
+    };
+    last_explain_summary_ = explain_engine.summary(explain_request);
+    last_explain_lines_ = explain_engine.details(explain_request);
+
+    if (action == "check") {
         std::cout << "[*] module category: " << active_descriptor.category << '\n';
-        std::cout << "[*] targets provided: " << targets.size() << '\n';
+        std::cout << "[*] targets provided: " << sanitized_targets.size() << '\n';
         std::cout << "[*] scope enforcement: " << (enforce_scope_ ? "on" : "off") << '\n';
         if (missing_required.empty()) {
             std::cout << "[*] required options: satisfied\n";
@@ -1972,7 +2243,7 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
         }
 
         std::size_t in_scope = 0;
-        for (const std::string& target : targets) {
+        for (const std::string& target : sanitized_targets) {
             const bool allowed = !enforce_scope_ || is_target_in_scope(allowed_targets_, target);
             std::cout << "  " << target << " => " << (allowed ? "allowed" : "blocked") << '\n';
             if (allowed) {
@@ -1980,6 +2251,25 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
             }
         }
 
+        std::cout << "[*] simulation profile: " << sim_outcome.execution_profile
+                  << ", confidence=" << sim_outcome.confidence_score
+                  << ", stability=" << sim_outcome.overall_stability << '\n';
+        std::cout << "[*] dualstack readiness: "
+                  << (sim_outcome.dual_stack_ready ? "yes" : "no")
+                  << " (ipv4=" << sim_outcome.ipv4_targets
+                  << ", ipv6=" << sim_outcome.ipv6_targets << ")\n";
+
+        for (const SimulationTargetResult& result : sim_outcome.target_results) {
+            std::cout << "  - " << result.target
+                      << " [" << result.ip_version << "]"
+                      << " quality=" << result.quality_band
+                      << " success=" << result.success_probability
+                      << " latency=" << result.latency_ms << "ms"
+                      << " jitter=" << result.jitter_ms << "ms"
+                      << " risk=" << result.detection_risk << '\n';
+        }
+
+        std::cout << "[*] explain summary: " << last_explain_summary_ << '\n';
         if (in_scope > 0 && missing_required.empty()) {
             std::cout << "[+] ready to run\n";
         } else if (in_scope == 0) {
@@ -1995,48 +2285,21 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
                 std::cout << "  " << option << '\n';
             }
             std::cout << "Use 'show options' and set required values before run.\n";
+            std::cout << "[*] explain summary: " << last_explain_summary_ << '\n';
             return true;
-        }
-
-        const std::string transport = [&] {
-            const std::string configured = get_option_value(active_options_, global_options_, "TRANSPORT");
-            return configured.empty() ? "http_simulated" : configured;
-        }();
-
-        std::vector<std::string> targets;
-        const std::string rhosts = get_option_value(active_options_, global_options_, "RHOSTS");
-        const std::string rhost = get_option_value(active_options_, global_options_, "RHOST");
-        const std::string rhost6 = get_option_value(active_options_, global_options_, "RHOST6");
-
-        if (!rhosts.empty()) {
-            targets = split_targets(rhosts);
-        } else if (!rhost.empty()) {
-            targets.push_back(rhost);
-        } else if (!rhost6.empty()) {
-            targets.push_back(rhost6);
-        } else {
-            targets.push_back("lab-node-auto");
         }
 
         const std::string lhost = get_option_value(active_options_, global_options_, "LHOST");
         const std::string lhost6 = get_option_value(active_options_, global_options_, "LHOST6");
         const std::string lport = get_option_value(active_options_, global_options_, "LPORT");
 
-        std::vector<std::string> effective_targets;
-        for (const std::string& target : targets) {
-            if (enforce_scope_ && !is_target_in_scope(allowed_targets_, target)) {
-                std::cout << "[-] blocked by scope policy: " << target << '\n';
-                continue;
-            }
-            effective_targets.push_back(target);
-        }
+        std::cout << "[*] profile=" << sim_outcome.execution_profile
+                  << " confidence=" << sim_outcome.confidence_score
+                  << " stability=" << sim_outcome.overall_stability
+                  << " targets=" << effective_targets.size() << '\n';
+        std::cout << "[*] explain summary: " << last_explain_summary_ << '\n';
 
-        if (effective_targets.empty()) {
-            std::cout << "[-] no eligible targets after scope checks.\n";
-            return true;
-        }
-
-        if (active_descriptor.category == "auxiliary") {
+        if (!creates_session_category(active_descriptor.category)) {
             std::string report_body;
 
             if (active_module_ == "auxiliary/device_info/local_system_inventory") {
@@ -2055,9 +2318,34 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
                 report_body = "module=" + active_module_ + "\nstatus=executed\n";
             }
 
+            std::ostringstream simulation_section;
+            simulation_section << "\n[simulation]\n";
+            simulation_section << "profile=" << sim_outcome.execution_profile << '\n';
+            simulation_section << "confidence=" << sim_outcome.confidence_score << '\n';
+            simulation_section << "stability=" << sim_outcome.overall_stability << '\n';
+            simulation_section << "dualstack_ready=" << (sim_outcome.dual_stack_ready ? "yes" : "no") << '\n';
+            for (const SimulationTargetResult& result : sim_outcome.target_results) {
+                simulation_section << "target=" << result.target
+                                   << " ip=" << result.ip_version
+                                   << " success=" << result.success_probability
+                                   << " quality=" << result.quality_band
+                                   << " latency_ms=" << result.latency_ms
+                                   << " jitter_ms=" << result.jitter_ms
+                                   << " risk=" << result.detection_risk
+                                   << '\n';
+            }
+            simulation_section << "\n[explain]\n";
+            simulation_section << "summary=" << last_explain_summary_ << '\n';
+            for (const std::string& line : last_explain_lines_) {
+                simulation_section << "- " << line << '\n';
+            }
+
             const std::filesystem::path report_path =
                 runtime_workspace_reports_dir(active_workspace_) /
                 (short_module_name(active_module_) + "_" + compact_timestamp() + ".txt");
+            if (!verify_writable_output_file(report_path, "simulation report")) {
+                return true;
+            }
 
             std::ofstream report_output(report_path, std::ios::trunc);
             if (report_output) {
@@ -2067,21 +2355,26 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
                 report_output << "transport=" << transport << '\n';
                 report_output << "timestamp=" << now_string("%Y-%m-%d %H:%M:%S") << "\n\n";
                 report_output << report_body << '\n';
+                report_output << simulation_section.str();
             }
 
-            std::cout << "[+] auxiliary module completed. report: " << report_path.generic_string() << '\n';
+            std::cout << "[+] simulated module completed. report: " << report_path.generic_string() << '\n';
             log_session_line("aux_run module=" + active_module_ + " report=" + report_path.generic_string());
             return true;
         }
 
-        for (const std::string& target : effective_targets) {
+        for (const SimulationTargetResult& result : sim_outcome.target_results) {
+            const std::string& target = result.target;
             SessionInfo session;
             session.session_id = session_manager_.next_id();
             session.target_endpoint = target;
             session.host_label = target;
-            session.ip_version = detect_ip_version(target);
+            session.ip_version = result.ip_version;
             session.platform = active_platform_;
             session.transport_used = transport;
+            session.simulation_profile = sim_outcome.execution_profile;
+            session.quality_score = result.success_probability;
+            session.detection_risk = result.detection_risk;
 
             if (session.ip_version == "ipv6") {
                 session.local_bind = lhost6.empty() ? "::" : lhost6;
@@ -2100,6 +2393,9 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
 
             const std::filesystem::path session_path =
                 runtime_workspace_sessions_dir(active_workspace_) / ("session_" + session.session_id + ".json");
+            if (!verify_writable_output_file(session_path, "session artifact")) {
+                continue;
+            }
             std::ofstream output(session_path, std::ios::trunc);
             if (output) {
                 output << "{\n"
@@ -2110,6 +2406,9 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
                        << "  \"platform\": \"" << session.platform << "\",\n"
                        << "  \"transport_used\": \"" << session.transport_used << "\",\n"
                        << "  \"local_bind\": \"" << session.local_bind << "\",\n"
+                       << "  \"simulation_profile\": \"" << session.simulation_profile << "\",\n"
+                       << "  \"quality_score\": " << session.quality_score << ",\n"
+                       << "  \"detection_risk\": " << session.detection_risk << ",\n"
                        << "  \"agent\": \"pixelpreter\"\n"
                        << "}\n";
             }
@@ -2125,7 +2424,10 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
             std::cout << "[+] pixelpreter session " << session.session_id
                       << " opened target=" << session.target_endpoint
                       << " " << session.ip_version
-                      << " via " << session.transport_used << '\n';
+                      << " via " << session.transport_used
+                      << " quality=" << session.quality_score
+                      << " risk=" << session.detection_risk
+                      << '\n';
         }
     }
 
@@ -2170,6 +2472,9 @@ bool ConsoleEngine::enter_pixelpreter(const std::string& session_id) {
             std::cout << "Agent: pixelpreter/0.1.0\n";
             std::cout << "Target: " << session.target_endpoint << " [" << session.ip_version << "]\n";
             std::cout << "Listener: " << session.local_bind << '\n';
+            std::cout << "Profile: " << session.simulation_profile << '\n';
+            std::cout << "Quality: " << session.quality_score << '\n';
+            std::cout << "Detection risk: " << session.detection_risk << '\n';
             continue;
         }
         if (cmd == "getuid") {
@@ -2253,7 +2558,7 @@ std::string ConsoleEngine::prompt() const {
 void ConsoleEngine::print_help() const {
     std::cout
         << hdr("Core:") << '\n'
-        << "  help, banner, version, clear, history, verify paths, exit, quit\n"
+        << "  help, banner, version, clear, history, explain [last|summary], verify paths, exit, quit\n"
         << hdr("Workspace:") << '\n'
         << "  workspace list|add <name>|select <name>|delete <name>\n"
         << hdr("Tools policy:") << '\n'
@@ -2269,7 +2574,10 @@ void ConsoleEngine::print_help() const {
         << hdr("Execution workflow:") << '\n'
         << "  run, exploit, check, embed, extract, mutate, simulate, analyze\n"
         << "  network opts: set RHOST <ipv4>, set RHOST6 <ipv6>, set RHOSTS <list>,\n"
-        << "                set LHOST <ipv4>, set LHOST6 <ipv6>, set LPORT <port>\n"
+        << "                set LHOST <ipv4>, set LHOST6 <ipv6>, set LPORT <port>,\n"
+        << "                set INTENSITY <30-100>\n"
+        << "  image opts: set IMAGE <path>, set OUTFILE <path>, set SIMCODE <text>,\n"
+        << "              set EXTRACT_OUT <path>\n"
         << hdr("Session management:") << '\n'
         << "  sessions, sessions -l, sessions -i <id>, sessions -k <id>, sessions -K\n"
         << hdr("Logs and reports:") << '\n'
