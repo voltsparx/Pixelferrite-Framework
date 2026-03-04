@@ -1,0 +1,23 @@
+{
+  "id": "transports/tcp_simulated",
+  "name": "TCP Simulated",
+  "category": "transport",
+  "supported_platforms": [
+    "cross_platform"
+  ],
+  "supported_arch": [
+    "any"
+  ],
+  "author": "PixelFerrite Team",
+  "version": "0.2.0",
+  "options": [
+    {
+      "name": "LPORT",
+      "description": "Simulated listener port.",
+      "required": false,
+      "default": "4444"
+    }
+  ],
+  "safety_level": "simulation_only"
+}
+

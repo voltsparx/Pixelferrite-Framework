@@ -14,6 +14,7 @@ USER_LINK="${HOME}/.local/bin/pixelferrite"
 MODE="install"
 TARGET="system"
 ACTION="install"
+AUTO_YES=0
 SUDO=""
 
 INSTALL_ROOT=""
@@ -85,6 +86,86 @@ run_priv() {
   fail "Need elevated privileges to modify ${path_hint}."
 }
 
+confirm_action() {
+  local prompt="$1"
+  if [[ "${AUTO_YES}" -eq 1 ]]; then
+    return 0
+  fi
+
+  if [[ ! -t 0 ]]; then
+    fail "${prompt} (non-interactive shell; rerun with --yes to auto-confirm)"
+  fi
+
+  local reply=""
+  read -r -p "${prompt} [y/N]: " reply
+  case "${reply}" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ensure_build_dependencies() {
+  local -a missing=()
+  command -v cmake >/dev/null 2>&1 || missing+=("cmake")
+  command -v ninja >/dev/null 2>&1 || missing+=("ninja")
+  command -v g++ >/dev/null 2>&1 || missing+=("g++")
+  command -v make >/dev/null 2>&1 || missing+=("make")
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    info "Build dependencies already installed."
+    return 0
+  fi
+
+  warn "Missing build dependencies: ${missing[*]}"
+
+  local manager=""
+  local manager_hint=""
+  local -a install_cmd=()
+  local update_cmd=()
+
+  if command -v apt-get >/dev/null 2>&1; then
+    manager="apt"
+    manager_hint="$(command -v apt-get)"
+    update_cmd=(apt-get update)
+    install_cmd=(apt-get install -y build-essential cmake ninja-build)
+  elif command -v dnf >/dev/null 2>&1; then
+    manager="dnf"
+    manager_hint="$(command -v dnf)"
+    install_cmd=(dnf install -y gcc gcc-c++ make cmake ninja-build)
+  elif command -v pacman >/dev/null 2>&1; then
+    manager="pacman"
+    manager_hint="$(command -v pacman)"
+    install_cmd=(pacman -Sy --noconfirm base-devel cmake ninja)
+  else
+    fail "Package manager not recognized. Install these manually: ${missing[*]}"
+  fi
+
+  if ! confirm_action "Install missing dependencies using ${manager}?"; then
+    fail "Cannot continue without required build dependencies."
+  fi
+
+  if [[ ${#update_cmd[@]} -gt 0 ]]; then
+    info "Updating package index (${manager})"
+    run_priv "${manager_hint}" "${update_cmd[@]}"
+  fi
+
+  info "Installing dependencies (${manager})"
+  run_priv "${manager_hint}" "${install_cmd[@]}"
+
+  local -a still_missing=()
+  command -v cmake >/dev/null 2>&1 || still_missing+=("cmake")
+  command -v ninja >/dev/null 2>&1 || still_missing+=("ninja")
+  command -v g++ >/dev/null 2>&1 || still_missing+=("g++")
+  command -v make >/dev/null 2>&1 || still_missing+=("make")
+  if [[ ${#still_missing[@]} -gt 0 ]]; then
+    fail "Dependencies still missing after installation: ${still_missing[*]}"
+  fi
+}
+
 usage() {
   cat <<EOF
 Usage: bash building-scripts/install-linux.sh [options]
@@ -92,6 +173,7 @@ Usage: bash building-scripts/install-linux.sh [options]
 Options:
   --install              Build and install
   --test                 Build only
+  -y, --yes              Auto-confirm dependency installation prompts
   --system               Install to ${SYSTEM_ROOT}, expose ${SYSTEM_LINK}
   --user                 Install to ${USER_ROOT}, expose ${USER_LINK}
   --update-existing      Update an existing pixelferrite installation
@@ -165,6 +247,10 @@ while [[ $# -gt 0 ]]; do
       MODE="test"
       shift
       ;;
+    -y|--yes)
+      AUTO_YES=1
+      shift
+      ;;
     --system)
       TARGET="system"
       shift
@@ -227,20 +313,8 @@ if [[ "${ACTION}" == "update" ]]; then
   fi
 fi
 
-if [[ "${MODE}" == "install" ]]; then
-  if command -v apt-get >/dev/null 2>&1; then
-    info "Installing dependencies via apt"
-    run_priv "/usr/bin/apt-get" apt-get update
-    run_priv "/usr/bin/apt-get" apt-get install -y build-essential cmake ninja-build
-  elif command -v dnf >/dev/null 2>&1; then
-    info "Installing dependencies via dnf"
-    run_priv "/usr/bin/dnf" dnf install -y gcc gcc-c++ make cmake ninja-build
-  elif command -v pacman >/dev/null 2>&1; then
-    info "Installing dependencies via pacman"
-    run_priv "/usr/bin/pacman" pacman -Sy --noconfirm base-devel cmake ninja
-  else
-    warn "Package manager not recognized. Ensure toolchain + CMake + Ninja are installed."
-  fi
+if [[ "${MODE}" == "install" || "${MODE}" == "test" ]]; then
+  ensure_build_dependencies
 fi
 
 JOBS="$(nproc 2>/dev/null || echo 2)"

@@ -28,6 +28,19 @@ Installed framework layout:
 Note: optional framework directories (`payloads`, `lib`, `resources`) are only created when populated by installer inputs.
 Runtime logs are written to user data locations, not the immutable install root.
 
+## Dependency Prompts
+
+Installers now check build dependencies first and prompt before installing anything missing:
+
+- Linux: `cmake`, `ninja`, `g++`, `make`
+- macOS: `cmake`, `ninja`, `clang++`
+- Windows: `cmake`, `ninja`, and one compiler (`g++`/`clang++`/`cl`)
+
+To auto-confirm prompts in non-interactive runs:
+
+- Linux/macOS: add `-y` or `--yes`
+- Windows: add `-Yes`
+
 ## Platform Paths
 
 Linux:
@@ -54,18 +67,24 @@ Linux:
 
 ```bash
 bash building-scripts/install-linux.sh --install --system
+# non-interactive:
+# bash building-scripts/install-linux.sh --install --system --yes
 ```
 
 macOS:
 
 ```bash
 bash building-scripts/install-macos.sh --install --system
+# non-interactive:
+# bash building-scripts/install-macos.sh --install --system --yes
 ```
 
 Windows:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\building-scripts\install-windows.ps1 -Mode install -Target system
+# non-interactive:
+# powershell -ExecutionPolicy Bypass -File .\building-scripts\install-windows.ps1 -Mode install -Target system -Yes
 ```
 
 Linux -> Windows cross-build:

@@ -11,6 +11,7 @@ This page documents the active command surface from `help`.
 - `history`
 - `explain [last|summary]`
 - `verify paths`
+- `verify config`
 - `exit`, `quit`
 
 ## Workspace
@@ -52,6 +53,7 @@ When scope enforcement is `on`, out-of-scope targets are blocked during checks/r
 - `show platforms`
 - `show options`
 - `show sessions`
+- `show config`
 
 ## Module Lifecycle
 
@@ -163,4 +165,3 @@ run
 show sessions
 explain last
 ```
-

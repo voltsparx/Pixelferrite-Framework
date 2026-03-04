@@ -88,6 +88,12 @@ private:
     std::vector<std::string> allowed_targets_;
     std::vector<JobRecord> jobs_;
     std::vector<RouteEntry> routes_;
+    std::filesystem::path config_root_;
+    std::vector<std::string> logging_sinks_;
+    std::string logging_level_ = "info";
+    std::string framework_version_ = "0.1.0";
+    std::string safety_mode_ = "simulation_only";
+    std::string default_workspace_name_ = "default";
     int next_job_id_ = 1;
     int max_threads_ = 4;
     bool db_connected_ = false;

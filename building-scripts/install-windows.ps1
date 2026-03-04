@@ -3,6 +3,7 @@ param(
     [string]$Mode = "install",
     [ValidateSet("system", "user")]
     [string]$Target = "system",
+    [switch]$Yes,
     [switch]$UpdateExisting,
     [switch]$UninstallExisting,
     [switch]$Help
@@ -31,6 +32,7 @@ Usage:
 Options:
   -Mode <install|test>      Install mode or test mode
   -Target <system|user>     Install target root
+  -Yes                      Auto-confirm dependency installation prompts
   -UpdateExisting           Update an existing pixelferrite installation
   -UninstallExisting        Uninstall an existing pixelferrite installation
   -Help                     Show this help
@@ -137,6 +139,102 @@ function Remove-FromPath([string]$PathToRemove, [string]$Scope) {
     [Environment]::SetEnvironmentVariable("Path", ($filtered -join ';'), $Scope)
 }
 
+function Refresh-CurrentPath {
+    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+
+    if (-not $machinePath) { $machinePath = "" }
+    if (-not $userPath) { $userPath = "" }
+
+    $combined = @($machinePath, $userPath) -join ';'
+    $entries = $combined -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $env:Path = ($entries | Select-Object -Unique) -join ';'
+}
+
+function Get-AvailableCompiler {
+    foreach ($candidate in @("g++", "clang++", "cl")) {
+        if (Get-Command $candidate -ErrorAction SilentlyContinue) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function Confirm-Install([string]$Prompt) {
+    if ($Yes) {
+        return $true
+    }
+
+    if (-not [Environment]::UserInteractive) {
+        Fail "$Prompt (non-interactive shell detected; rerun with -Yes to auto-confirm)"
+    }
+
+    $reply = Read-Host "$Prompt [y/N]"
+    return $reply -match '^(?i:y|yes)$'
+}
+
+function Ensure-BuildDependencies {
+    $missing = @()
+
+    if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
+        $missing += [PSCustomObject]@{
+            Name = "cmake"
+            WingetId = "Kitware.CMake"
+        }
+    }
+
+    if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+        $missing += [PSCustomObject]@{
+            Name = "ninja"
+            WingetId = "Ninja-build.Ninja"
+        }
+    }
+
+    if (-not (Get-AvailableCompiler)) {
+        $missing += [PSCustomObject]@{
+            Name = "compiler (clang++)"
+            WingetId = "LLVM.LLVM"
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        Write-Info "Build dependencies already installed."
+        return
+    }
+
+    $missingNames = ($missing | ForEach-Object { $_.Name }) -join ", "
+    Write-Warn "Missing build dependencies: $missingNames"
+
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $winget) {
+        Fail "winget is not available. Install the missing dependencies manually: $missingNames"
+    }
+
+    if (-not (Confirm-Install "Install missing dependencies using winget?")) {
+        Fail "Cannot continue without required build dependencies."
+    }
+
+    foreach ($dep in $missing) {
+        Write-Info "Installing $($dep.Name) via winget ($($dep.WingetId))"
+        & winget install --id $dep.WingetId -e --silent --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Failed to install $($dep.Name) via winget (exit code $LASTEXITCODE)."
+        }
+    }
+
+    Refresh-CurrentPath
+
+    $stillMissing = @()
+    if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) { $stillMissing += "cmake" }
+    if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { $stillMissing += "ninja" }
+    if (-not (Get-AvailableCompiler)) { $stillMissing += "compiler (g++/clang++/cl)" }
+
+    if ($stillMissing.Count -gt 0) {
+        $list = $stillMissing -join ", "
+        Fail "Dependencies still missing after installation: $list"
+    }
+}
+
 if ($Help) {
     Show-Usage
     exit 0
@@ -148,10 +246,6 @@ if ($UpdateExisting -and $UninstallExisting) {
 
 if ($Mode -eq "test" -and ($UpdateExisting -or $UninstallExisting)) {
     Fail "-UpdateExisting and -UninstallExisting are only supported in install mode."
-}
-
-if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
-    Fail "CMake not found in PATH."
 }
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).
@@ -200,12 +294,21 @@ if ($UninstallExisting) {
     exit 0
 }
 
+Ensure-BuildDependencies
+
 if ($Mode -eq "install" -and $Target -eq "system" -and -not $isAdmin) {
     Fail "System install requires Administrator privileges."
 }
 
 Write-Info "Configuring build directory $buildDir"
-Invoke-Tool -Tool "cmake" -Args @("-S", $projectRoot, "-B", $buildDir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON") -FailureMessage "CMake configure failed"
+$compiler = Get-AvailableCompiler
+$cmakeConfigureArgs = @("-S", $projectRoot, "-B", $buildDir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+if ($compiler -eq "g++") {
+    $cmakeConfigureArgs += "-DCMAKE_CXX_COMPILER=g++"
+} elseif ($compiler -eq "clang++") {
+    $cmakeConfigureArgs += "-DCMAKE_CXX_COMPILER=clang++"
+}
+Invoke-Tool -Tool "cmake" -Args $cmakeConfigureArgs -FailureMessage "CMake configure failed"
 
 Write-Info "Building"
 Invoke-Tool -Tool "cmake" -Args @("--build", $buildDir, "--config", "Release") -FailureMessage "Build failed"

@@ -28,6 +28,7 @@ The current runtime is intentionally **simulation-only**. It models payload/expl
 ## Core Capabilities
 
 - Manifest-driven module discovery from `modules/**/module.json`
+- Runtime config loader for `config/framework.yml`, `config/logging.yml`, `config/workspace.yml`
 - Module categories: `payload`, `exploit`, `auxiliary`, `encoder`, `evasion`, `nop`, `transport`, `analysis`, `detection`, `lab`
 - Dual-stack simulation support (`RHOST`, `RHOST6`, `RHOSTS`, `LHOST`, `LHOST6`, `LPORT`)
 - Simulation quality metrics: profile, confidence, stability, detection risk, dual-stack readiness
@@ -35,6 +36,22 @@ The current runtime is intentionally **simulation-only**. It models payload/expl
 - Workspace-isolated runtime output (logs/reports/sessions/tmp/datasets)
 - Safe image simulation embedding/extraction with integrity checks for:
   - `.jpg`, `.jpeg`, `.png`, `.gif`, `.svg`
+
+## Configuration
+
+Runtime configuration is loaded at startup from:
+
+1. `PF_CONFIG_DIR` (if set)
+2. `./config`
+3. `PF_HOME/config` (if set)
+4. install-relative `config/` paths
+
+Quick inspection from console:
+
+```text
+show config
+verify config
+```
 
 ## Repository Layout
 
@@ -128,17 +145,17 @@ pixelgen -p payloads/linux/telemetry_linux -t tcp \
 Windows:
 
 - `%APPDATA%\PixelFerrite\logs`
-- `%APPDATA%\PixelFerrite\workspace\<workspace>\{reports,sessions,tmp,datasets}`
+- `%APPDATA%\PixelFerrite\workspace\<workspace>\{<reports_root>,<sessions_root>,<temp_root>,datasets}`
 
 Linux:
 
 - `~/.local/share/pixelferrite/logs`
-- `~/.local/share/pixelferrite/workspace/<workspace>/{reports,sessions,tmp,datasets}`
+- `~/.local/share/pixelferrite/workspace/<workspace>/{<reports_root>,<sessions_root>,<temp_root>,datasets}`
 
 macOS:
 
 - `~/Library/Application Support/pixelferrite/logs`
-- `~/Library/Application Support/pixelferrite/workspace/<workspace>/{reports,sessions,tmp,datasets}`
+- `~/Library/Application Support/pixelferrite/workspace/<workspace>/{<reports_root>,<sessions_root>,<temp_root>,datasets}`
 
 ## Current Tooling Notes
 
@@ -149,4 +166,3 @@ macOS:
 ## License
 
 See [`LICENSE`](LICENSE).
-

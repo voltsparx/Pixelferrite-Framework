@@ -60,7 +60,7 @@ pixelgen -l payloads
 
 - Always writes artifact when `-p` is set.
 - Default path (if `-o` missing):
-  - user-data workspace tmp (`pixelgen_artifact.json`)
+  - user-data workspace tmp for active workspace from config (`pixelgen_artifact.json`)
 
 ### Simulation Image Output
 
@@ -116,4 +116,3 @@ pixelgen -p payloads/linux/telemetry_linux -t tcp \
 
 - Image embedding details: [`image_embedding.md`](image_embedding.md)
 - Console workflow: [`console_commands.md`](console_commands.md)
-

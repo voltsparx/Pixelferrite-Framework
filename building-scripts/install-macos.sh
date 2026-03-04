@@ -14,6 +14,7 @@ USER_LINK="${HOME}/.local/bin/pixelferrite"
 MODE="install"
 TARGET="system"
 ACTION="install"
+AUTO_YES=0
 SUDO=""
 
 INSTALL_ROOT=""
@@ -85,6 +86,83 @@ run_priv() {
   fail "Need elevated privileges to modify ${path_hint}."
 }
 
+confirm_action() {
+  local prompt="$1"
+  if [[ "${AUTO_YES}" -eq 1 ]]; then
+    return 0
+  fi
+
+  if [[ ! -t 0 ]]; then
+    fail "${prompt} (non-interactive shell; rerun with --yes to auto-confirm)"
+  fi
+
+  local reply=""
+  read -r -p "${prompt} [y/N]: " reply
+  case "${reply}" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ensure_build_dependencies() {
+  local -a missing=()
+  command -v cmake >/dev/null 2>&1 || missing+=("cmake")
+  command -v ninja >/dev/null 2>&1 || missing+=("ninja")
+  command -v clang++ >/dev/null 2>&1 || missing+=("clang++")
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    info "Build dependencies already installed."
+    return 0
+  fi
+
+  warn "Missing build dependencies: ${missing[*]}"
+  if ! confirm_action "Install missing dependencies now?"; then
+    fail "Cannot continue without required build dependencies."
+  fi
+
+  if [[ " ${missing[*]} " == *" clang++ "* ]]; then
+    if command -v xcode-select >/dev/null 2>&1; then
+      if ! xcode-select -p >/dev/null 2>&1; then
+        info "Requesting Xcode Command Line Tools installation"
+        if ! xcode-select --install >/dev/null 2>&1; then
+          warn "Could not auto-start Xcode Command Line Tools installer. Install it manually if clang++ stays missing."
+        fi
+      fi
+    else
+      warn "xcode-select not found. Install Xcode Command Line Tools manually."
+    fi
+  fi
+
+  local -a brew_packages=()
+  if [[ " ${missing[*]} " == *" cmake "* ]]; then
+    brew_packages+=("cmake")
+  fi
+  if [[ " ${missing[*]} " == *" ninja "* ]]; then
+    brew_packages+=("ninja")
+  fi
+
+  if [[ ${#brew_packages[@]} -gt 0 ]]; then
+    if ! command -v brew >/dev/null 2>&1; then
+      fail "Homebrew is required to install: ${brew_packages[*]}. Install Homebrew or dependencies manually."
+    fi
+    info "Installing dependencies via Homebrew: ${brew_packages[*]}"
+    run_cmd brew update
+    run_cmd brew install "${brew_packages[@]}"
+  fi
+
+  local -a still_missing=()
+  command -v cmake >/dev/null 2>&1 || still_missing+=("cmake")
+  command -v ninja >/dev/null 2>&1 || still_missing+=("ninja")
+  command -v clang++ >/dev/null 2>&1 || still_missing+=("clang++")
+  if [[ ${#still_missing[@]} -gt 0 ]]; then
+    fail "Dependencies still missing after install attempt: ${still_missing[*]}"
+  fi
+}
+
 usage() {
   cat <<EOF
 Usage: bash building-scripts/install-macos.sh [options]
@@ -92,6 +170,7 @@ Usage: bash building-scripts/install-macos.sh [options]
 Options:
   --install              Build and install
   --test                 Build only
+  -y, --yes              Auto-confirm dependency installation prompts
   --system               Install to ${SYSTEM_ROOT}, expose ${SYSTEM_LINK}
   --user                 Install to ${USER_ROOT}, expose ${USER_LINK}
   --update-existing      Update an existing pixelferrite installation
@@ -171,6 +250,10 @@ while [[ $# -gt 0 ]]; do
       MODE="test"
       shift
       ;;
+    -y|--yes)
+      AUTO_YES=1
+      shift
+      ;;
     --system)
       TARGET="system"
       shift
@@ -233,10 +316,8 @@ if [[ "${ACTION}" == "update" ]]; then
   fi
 fi
 
-if [[ "${MODE}" == "install" && -x "$(command -v brew 2>/dev/null || true)" ]]; then
-  info "Ensuring dependencies via Homebrew"
-  run_cmd brew update
-  run_cmd brew install cmake ninja
+if [[ "${MODE}" == "install" || "${MODE}" == "test" ]]; then
+  ensure_build_dependencies
 fi
 
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"

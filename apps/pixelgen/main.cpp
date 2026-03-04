@@ -1,5 +1,6 @@
 #include <pixelferrite/module_loader.hpp>
 #include <pixelferrite/colors.hpp>
+#include <pixelferrite/config_loader.hpp>
 #include <pixelferrite/image_engine.hpp>
 #include <pixelferrite/path_verifier.hpp>
 
@@ -157,8 +158,9 @@ std::filesystem::path runtime_data_root() {
 #endif
 }
 
-std::filesystem::path default_artifact_path() {
-    return runtime_data_root() / "workspace" / "default" / "tmp" / "pixelgen_artifact.json";
+std::filesystem::path default_artifact_path(const std::string& workspace_name) {
+    const std::string workspace = workspace_name.empty() ? "default" : workspace_name;
+    return runtime_data_root() / "workspace" / workspace / "tmp" / "pixelgen_artifact.json";
 }
 
 std::string compact_timestamp() {
@@ -296,10 +298,17 @@ bool report_path_check(const pixelferrite::path_verifier::CheckResult& result) {
     return false;
 }
 
-std::string resolve_modules_root(std::string modules_root) {
+std::string resolve_modules_root(std::string modules_root, const std::filesystem::path& config_dir = {}) {
     const std::filesystem::path direct(modules_root);
     if (std::filesystem::exists(direct)) {
         return direct.generic_string();
+    }
+
+    if (!config_dir.empty()) {
+        const std::filesystem::path from_config_parent = config_dir.parent_path() / modules_root;
+        if (std::filesystem::exists(from_config_parent)) {
+            return from_config_parent.generic_string();
+        }
     }
 
     if (const char* home = std::getenv("PF_HOME"); home != nullptr && *home != '\0') {
@@ -328,13 +337,15 @@ std::string resolve_modules_root(std::string modules_root) {
 bool verify_startup_paths(
     const CliOptions& options,
     const std::string& modules_root,
+    const std::string& workspace_name,
     bool require_modules_root,
     bool require_output_path,
     const std::filesystem::path& image_output_path
 ) {
     bool ok = true;
     const std::filesystem::path data_root = runtime_data_root();
-    const std::filesystem::path workspace_root = data_root / "workspace" / "default";
+    const std::filesystem::path workspace_root =
+        data_root / "workspace" / (workspace_name.empty() ? "default" : workspace_name);
 
     ok = report_path_check(pixelferrite::path_verifier::ensure_directory(data_root, "pixelgen data root")) && ok;
     ok = report_path_check(pixelferrite::path_verifier::ensure_directory(workspace_root, "pixelgen workspace root")) && ok;
@@ -360,7 +371,7 @@ bool verify_startup_paths(
 
     if (require_output_path) {
         const std::filesystem::path output_file =
-            options.output.empty() ? default_artifact_path() : std::filesystem::path(options.output);
+            options.output.empty() ? default_artifact_path(workspace_name) : std::filesystem::path(options.output);
         ok = report_path_check(
             pixelferrite::path_verifier::require_writable_file_path(output_file, "output artifact")
         ) && ok;
@@ -562,9 +573,9 @@ bool parse_args(int argc, char** argv, CliOptions& options) {
     return true;
 }
 
-bool write_artifact(const CliOptions& options) {
+bool write_artifact(const CliOptions& options, const std::string& workspace_name) {
     const std::filesystem::path output_file =
-        options.output.empty() ? default_artifact_path() : std::filesystem::path(options.output);
+        options.output.empty() ? default_artifact_path(workspace_name) : std::filesystem::path(options.output);
     const std::string out_path = output_file.generic_string();
 
     const auto writable =
@@ -702,11 +713,32 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    const pixelferrite::RuntimeConfig runtime_config = pixelferrite::ConfigLoader::load();
+    for (const std::string& warning : runtime_config.warnings) {
+        std::cerr << pixelferrite::colors::wrap("[*] config", pixelferrite::colors::warning())
+                  << " " << warning << '\n';
+    }
+
+    const std::string workspace_name =
+        runtime_config.workspace.active_workspace.empty()
+            ? runtime_config.workspace.default_workspace
+            : runtime_config.workspace.active_workspace;
+    const std::string resolved_workspace = workspace_name.empty() ? "default" : workspace_name;
+    const std::string configured_modules_root =
+        runtime_config.framework.modules_root.empty() ? "modules" : runtime_config.framework.modules_root;
+
     const std::filesystem::path image_output_path = resolve_image_output_path(options);
-    const std::string modules_root = resolve_modules_root("modules");
+    const std::string modules_root = resolve_modules_root(configured_modules_root, runtime_config.config_dir);
     const bool requires_modules = options.list_target.empty() || options.list_target != "formats";
     const bool requires_output_path = options.list_target.empty();
-    if (!verify_startup_paths(options, modules_root, requires_modules, requires_output_path, image_output_path)) {
+    if (!verify_startup_paths(
+            options,
+            modules_root,
+            resolved_workspace,
+            requires_modules,
+            requires_output_path,
+            image_output_path
+        )) {
         return 1;
     }
 
@@ -724,8 +756,12 @@ int main(int argc, char** argv) {
     }
 
     const bool image_ok = write_simulation_image(options, image_output_path);
-    const bool artifact_ok = write_artifact(options);
-    return (image_ok && artifact_ok) ? 0 : 1;
+    if (!image_ok) {
+        return 1;
+    }
+
+    const bool artifact_ok = write_artifact(options, resolved_workspace);
+    return artifact_ok ? 0 : 1;
 }
 
 

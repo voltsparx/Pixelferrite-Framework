@@ -1,6 +1,7 @@
 add_library(pixelferrite_core
     src/analysis_engine.cpp
     src/banner.cpp
+    src/config_loader.cpp
     src/colors.cpp
     src/console.cpp
     src/detection_engine.cpp

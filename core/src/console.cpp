@@ -30,6 +30,7 @@
 
 #include <pixelferrite/banner.hpp>
 #include <pixelferrite/colors.hpp>
+#include <pixelferrite/config_loader.hpp>
 #include <pixelferrite/explain_engine.hpp>
 #include <pixelferrite/image_engine.hpp>
 #include <pixelferrite/logger.hpp>
@@ -41,6 +42,67 @@ namespace pixelferrite {
 namespace {
 
 constexpr std::string_view kVersion = "0.1.0";
+std::string g_workspace_reports_root = "reports";
+std::string g_workspace_sessions_root = "sessions";
+std::string g_workspace_temp_root = "tmp";
+
+std::string normalize_workspace_subpath(const std::string& raw, std::string_view fallback) {
+    if (raw.empty()) {
+        return std::string(fallback);
+    }
+
+    const std::filesystem::path path(raw);
+    if (path.is_absolute()) {
+        return std::string(fallback);
+    }
+
+    const std::filesystem::path normalized = path.lexically_normal();
+    if (normalized.empty() || normalized == ".") {
+        return std::string(fallback);
+    }
+
+    for (const auto& part : normalized) {
+        if (part == "..") {
+            return std::string(fallback);
+        }
+    }
+
+    return normalized.generic_string();
+}
+
+bool is_safe_relative_subpath(const std::string& raw) {
+    if (raw.empty()) {
+        return false;
+    }
+
+    const std::filesystem::path path(raw);
+    if (path.is_absolute()) {
+        return false;
+    }
+
+    const std::filesystem::path normalized = path.lexically_normal();
+    if (normalized.empty() || normalized == ".") {
+        return false;
+    }
+
+    for (const auto& part : normalized) {
+        if (part == "..") {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::unordered_map<std::string, std::size_t> module_category_counts(
+    const std::vector<ModuleDescriptor>& modules
+) {
+    std::unordered_map<std::string, std::size_t> counts;
+    for (const ModuleDescriptor& module : modules) {
+        ++counts[module.category];
+    }
+    return counts;
+}
 
 std::string hdr(std::string_view text) {
     return colors::wrap(text, colors::accent());
@@ -193,11 +255,11 @@ std::filesystem::path runtime_workspace_logs_dir(std::string_view workspace) {
 }
 
 std::filesystem::path runtime_workspace_reports_dir(std::string_view workspace) {
-    return runtime_workspace_dir(workspace) / "reports";
+    return runtime_workspace_dir(workspace) / g_workspace_reports_root;
 }
 
 std::filesystem::path runtime_workspace_sessions_dir(std::string_view workspace) {
-    return runtime_workspace_dir(workspace) / "sessions";
+    return runtime_workspace_dir(workspace) / g_workspace_sessions_root;
 }
 
 std::filesystem::path runtime_workspace_scripts_dir(std::string_view workspace) {
@@ -209,7 +271,7 @@ std::filesystem::path runtime_workspace_state_dir(std::string_view workspace) {
 }
 
 std::filesystem::path runtime_workspace_tmp_dir(std::string_view workspace) {
-    return runtime_workspace_dir(workspace) / "tmp";
+    return runtime_workspace_dir(workspace) / g_workspace_temp_root;
 }
 
 std::filesystem::path runtime_workspace_dataset_dir(std::string_view workspace) {
@@ -240,13 +302,20 @@ bool ensure_workspace_layout(std::string_view workspace) {
     return ok;
 }
 
-std::string resolve_modules_root(std::string modules_root) {
+std::string resolve_modules_root(std::string modules_root, const std::filesystem::path& config_dir = {}) {
     const std::filesystem::path root_candidate(modules_root);
     if (root_candidate.is_absolute() && std::filesystem::exists(root_candidate)) {
         return root_candidate.generic_string();
     }
     if (std::filesystem::exists(root_candidate)) {
         return root_candidate.generic_string();
+    }
+
+    if (!config_dir.empty()) {
+        const std::filesystem::path from_config_parent = config_dir.parent_path() / modules_root;
+        if (std::filesystem::exists(from_config_parent)) {
+            return from_config_parent.generic_string();
+        }
     }
 
     if (const char* home = std::getenv("PF_HOME"); home != nullptr && *home != '\0') {
@@ -358,6 +427,13 @@ std::string normalize_tool_name(std::string tool) {
 bool is_supported_external_tool(const std::string& tool) {
     const std::string normalized = normalize_tool_name(tool);
     return normalized == "nmap" || normalized == "netprobe-rs";
+}
+
+std::unordered_set<std::string> default_allowed_tools_for_safety_mode(const std::string& safety_mode) {
+    if (to_lower(safety_mode) == "strict") {
+        return {};
+    }
+    return {"nmap", "netprobe-rs"};
 }
 
 std::string read_text_file(const std::filesystem::path& path) {
@@ -668,19 +744,56 @@ std::string run_ping_probe(const std::vector<std::string>& targets) {
 
 }  // namespace
 
-ConsoleEngine::ConsoleEngine(std::string modules_root)
-    : modules_root_(resolve_modules_root(std::move(modules_root))) {
+ConsoleEngine::ConsoleEngine(std::string modules_root) {
     colors::initialize();
+
+    const RuntimeConfig runtime_config = ConfigLoader::load();
+    config_root_ = runtime_config.config_dir;
+    logging_level_ = runtime_config.logging.level.empty() ? "info" : runtime_config.logging.level;
+    logging_sinks_ = runtime_config.logging.sinks;
+    framework_version_ = runtime_config.framework.version.empty() ? std::string(kVersion) : runtime_config.framework.version;
+    safety_mode_ = runtime_config.framework.safety_mode.empty() ? "simulation_only" : runtime_config.framework.safety_mode;
+    default_workspace_name_ =
+        runtime_config.workspace.default_workspace.empty() ? "default" : runtime_config.workspace.default_workspace;
+    active_workspace_ =
+        runtime_config.workspace.active_workspace.empty() ? default_workspace_name_ : runtime_config.workspace.active_workspace;
+    g_workspace_temp_root = normalize_workspace_subpath(runtime_config.workspace.temp_root, "tmp");
+    g_workspace_reports_root = normalize_workspace_subpath(runtime_config.workspace.reports_root, "reports");
+    g_workspace_sessions_root = normalize_workspace_subpath(runtime_config.workspace.sessions_root, "sessions");
+
+    workspaces_.clear();
+    workspaces_.push_back(default_workspace_name_);
+    if (active_workspace_ != default_workspace_name_) {
+        workspaces_.push_back(active_workspace_);
+    }
+
+    const bool caller_overrode_modules_root = !modules_root.empty() && modules_root != "modules";
+    const std::string configured_modules_root = caller_overrode_modules_root
+        ? modules_root
+        : (runtime_config.framework.modules_root.empty() ? "modules" : runtime_config.framework.modules_root);
+    modules_root_ = resolve_modules_root(configured_modules_root, config_root_);
+
     const bool paths_ok = verify_runtime_paths(active_workspace_, modules_root_);
     if (!paths_ok) {
         std::cout << warn_msg("[*] runtime path verification reported issues; some features may be unavailable.") << '\n';
     }
 
+    for (const std::string& warning : runtime_config.warnings) {
+        std::cout << warn_msg("[*] config") << " " << warning << '\n';
+    }
+    if (!config_root_.empty()) {
+        std::cout << info_msg("[*] loaded config from")
+                  << " " << colors::wrap(config_root_.generic_string(), colors::dim()) << '\n';
+    }
+
     ensure_runtime_layout();
+    ensure_workspace_layout(default_workspace_name_);
     ensure_workspace_layout(active_workspace_);
     modules_ = module_loader_.discover(modules_root_);
-    allowed_tools_by_workspace_[active_workspace_] = {"nmap", "netprobe-rs"};
+    allowed_tools_by_workspace_[active_workspace_] = default_allowed_tools_for_safety_mode(safety_mode_);
+    allowed_tools_by_workspace_[default_workspace_name_] = default_allowed_tools_for_safety_mode(safety_mode_);
     denied_tools_by_workspace_[active_workspace_] = {};
+    denied_tools_by_workspace_[default_workspace_name_] = {};
 }
 
 void ConsoleEngine::show_banner() const {
@@ -724,6 +837,28 @@ void ConsoleEngine::run_repl() {
               << " " << colors::wrap(std::to_string(load_elapsed.count()) + "ms", colors::accent())
               << '\n';
 
+    const auto category_counts = module_category_counts(modules_);
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 10> kCategoryOrder = {{
+        {"payload", "payloads"},
+        {"exploit", "exploits"},
+        {"auxiliary", "auxiliary"},
+        {"encoder", "encoders"},
+        {"evasion", "evasion"},
+        {"nop", "nops"},
+        {"transport", "transports"},
+        {"detection", "detection"},
+        {"analysis", "analysis"},
+        {"lab", "lab"}
+    }};
+    std::cout << info_msg("[*] Category counts:");
+    for (const auto& [category, label] : kCategoryOrder) {
+        const auto found = category_counts.find(std::string(category));
+        const std::size_t count = (found == category_counts.end()) ? 0 : found->second;
+        const std::string chunk = std::string(label) + "=" + std::to_string(count);
+        std::cout << " " << colors::wrap(chunk, colors::for_category(category));
+    }
+    std::cout << '\n';
+
     Logger::info("pffconsole initialized");
     std::cout << info_msg("pff> type 'help' for commands, 'exit' to quit") << '\n';
 
@@ -761,7 +896,11 @@ bool ConsoleEngine::handle_command(const std::string& line) {
     }
     if (command == "version") {
         std::cout << colors::wrap("PixelFerrite Framework v", colors::brand())
-                  << colors::wrap(std::string(kVersion), colors::accent()) << '\n';
+                  << colors::wrap(framework_version_, colors::accent());
+        if (framework_version_ != kVersion) {
+            std::cout << " " << colors::wrap("(core " + std::string(kVersion) + ")", colors::dim());
+        }
+        std::cout << '\n';
         return true;
     }
     if (command == "clear") {
@@ -877,7 +1016,8 @@ bool ConsoleEngine::handle_command(const std::string& line) {
     if (is_supported_external_tool(command)) {
         const std::string normalized_tool = normalize_tool_name(command);
         if (allowed_tools_by_workspace_.find(active_workspace_) == allowed_tools_by_workspace_.end()) {
-            allowed_tools_by_workspace_[active_workspace_] = {"nmap", "netprobe-rs"};
+            allowed_tools_by_workspace_[active_workspace_] =
+                default_allowed_tools_for_safety_mode(safety_mode_);
         }
         if (denied_tools_by_workspace_.find(active_workspace_) == denied_tools_by_workspace_.end()) {
             denied_tools_by_workspace_[active_workspace_] = {};
@@ -987,7 +1127,7 @@ bool ConsoleEngine::handle_workspace(const std::vector<std::string>& tokens) {
         if (!ensure_workspace_layout(name)) {
             std::cout << "[-] workspace path setup failed: " << name << '\n';
         }
-        allowed_tools_by_workspace_[name] = {"nmap", "netprobe-rs"};
+        allowed_tools_by_workspace_[name] = default_allowed_tools_for_safety_mode(safety_mode_);
         denied_tools_by_workspace_[name] = {};
         std::cout << "[+] Workspace added: " << name << '\n';
         return true;
@@ -1000,7 +1140,7 @@ bool ConsoleEngine::handle_workspace(const std::vector<std::string>& tokens) {
         }
         active_workspace_ = name;
         if (allowed_tools_by_workspace_.find(name) == allowed_tools_by_workspace_.end()) {
-            allowed_tools_by_workspace_[name] = {"nmap", "netprobe-rs"};
+            allowed_tools_by_workspace_[name] = default_allowed_tools_for_safety_mode(safety_mode_);
         }
         if (denied_tools_by_workspace_.find(name) == denied_tools_by_workspace_.end()) {
             denied_tools_by_workspace_[name] = {};
@@ -1013,7 +1153,7 @@ bool ConsoleEngine::handle_workspace(const std::vector<std::string>& tokens) {
     }
 
     if (action == "delete") {
-        if (name == "default") {
+        if (name == default_workspace_name_) {
             std::cout << "[-] Cannot delete default workspace.\n";
             return true;
         }
@@ -1041,7 +1181,7 @@ bool ConsoleEngine::handle_workspace(const std::vector<std::string>& tokens) {
 
 bool ConsoleEngine::handle_tools(const std::vector<std::string>& tokens) {
     if (allowed_tools_by_workspace_.find(active_workspace_) == allowed_tools_by_workspace_.end()) {
-        allowed_tools_by_workspace_[active_workspace_] = {"nmap", "netprobe-rs"};
+        allowed_tools_by_workspace_[active_workspace_] = default_allowed_tools_for_safety_mode(safety_mode_);
     }
     if (denied_tools_by_workspace_.find(active_workspace_) == denied_tools_by_workspace_.end()) {
         denied_tools_by_workspace_[active_workspace_] = {};
@@ -1079,7 +1219,7 @@ bool ConsoleEngine::handle_tools(const std::vector<std::string>& tokens) {
     }
 
     if (action == "reset") {
-        allowed = {"nmap", "netprobe-rs"};
+        allowed = default_allowed_tools_for_safety_mode(safety_mode_);
         denied.clear();
         std::cout << "[*] tool policy reset to defaults.\n";
         return true;
@@ -1208,37 +1348,130 @@ bool ConsoleEngine::handle_explain(const std::vector<std::string>& tokens) const
 }
 
 bool ConsoleEngine::handle_verify(const std::vector<std::string>& tokens) const {
-    if (tokens.size() < 2 || to_lower(tokens[1]) != "paths") {
-        std::cout << "Usage: verify paths\n";
-        return true;
-    }
-
-    bool ok = true;
-    ok = report_path_check(path_verifier::ensure_directory(runtime_data_root(), "runtime data root")) && ok;
-    ok = report_path_check(path_verifier::ensure_directory(runtime_logs_dir(), "runtime logs")) && ok;
-    ok = report_path_check(path_verifier::ensure_directory(runtime_config_dir(), "runtime config")) && ok;
-    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_root_dir(), "runtime workspace root")) && ok;
-    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_dir(active_workspace_), "active workspace root")) && ok;
-    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_reports_dir(active_workspace_), "active workspace reports")) && ok;
-    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_sessions_dir(active_workspace_), "active workspace sessions")) && ok;
-    ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_tmp_dir(active_workspace_), "active workspace tmp")) && ok;
-    ok = report_path_check(path_verifier::require_existing_directory(modules_root_, "modules root")) && ok;
-
-    if (ok) {
-        std::cout << "[+] path verification passed.\n";
-    } else {
-        std::cout << "[-] path verification failed. review errors above.\n";
-    }
-    return ok;
-}
-
-bool ConsoleEngine::handle_show(const std::vector<std::string>& tokens) const {
     if (tokens.size() < 2) {
-        std::cout << "Usage: show <modules|payloads|exploits|auxiliary|encoders|evasion|nops|transports|detection|analysis|lab|options|platforms|sessions>\n";
+        std::cout << "Usage: verify <paths|config>\n";
         return true;
     }
 
     const std::string target = to_lower(tokens[1]);
+    if (target == "paths") {
+        bool ok = true;
+        ok = report_path_check(path_verifier::ensure_directory(runtime_data_root(), "runtime data root")) && ok;
+        ok = report_path_check(path_verifier::ensure_directory(runtime_logs_dir(), "runtime logs")) && ok;
+        ok = report_path_check(path_verifier::ensure_directory(runtime_config_dir(), "runtime config")) && ok;
+        ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_root_dir(), "runtime workspace root")) && ok;
+        ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_dir(active_workspace_), "active workspace root")) && ok;
+        ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_reports_dir(active_workspace_), "active workspace reports")) && ok;
+        ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_sessions_dir(active_workspace_), "active workspace sessions")) && ok;
+        ok = report_path_check(path_verifier::ensure_directory(runtime_workspace_tmp_dir(active_workspace_), "active workspace tmp")) && ok;
+        ok = report_path_check(path_verifier::require_existing_directory(modules_root_, "modules root")) && ok;
+
+        if (ok) {
+            std::cout << "[+] path verification passed.\n";
+        } else {
+            std::cout << "[-] path verification failed. review errors above.\n";
+        }
+        return ok;
+    }
+
+    if (target == "config") {
+        bool ok = true;
+        if (config_root_.empty()) {
+            std::cout << "[-] config root is unresolved.\n";
+            ok = false;
+        } else {
+            ok = report_path_check(path_verifier::require_existing_directory(config_root_, "config root")) && ok;
+            ok = report_path_check(path_verifier::require_existing_file(config_root_ / "framework.yml", "framework.yml")) && ok;
+            ok = report_path_check(path_verifier::require_existing_file(config_root_ / "logging.yml", "logging.yml")) && ok;
+            ok = report_path_check(path_verifier::require_existing_file(config_root_ / "workspace.yml", "workspace.yml")) && ok;
+        }
+
+        ok = report_path_check(path_verifier::require_existing_directory(modules_root_, "configured modules root")) && ok;
+
+        static const std::unordered_set<std::string> kAllowedSafetyModes = {
+            "strict",
+            "research",
+            "lab",
+            "simulation_only"
+        };
+        if (kAllowedSafetyModes.find(to_lower(safety_mode_)) == kAllowedSafetyModes.end()) {
+            std::cout << "[-] invalid safety mode: " << safety_mode_ << '\n';
+            ok = false;
+        }
+
+        static const std::unordered_set<std::string> kAllowedLogLevels = {
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "warning",
+            "error"
+        };
+        if (kAllowedLogLevels.find(to_lower(logging_level_)) == kAllowedLogLevels.end()) {
+            std::cout << "[-] invalid logging level: " << logging_level_ << '\n';
+            ok = false;
+        }
+
+        if (default_workspace_name_.empty() || active_workspace_.empty()) {
+            std::cout << "[-] workspace default/active names must not be empty.\n";
+            ok = false;
+        }
+
+        if (!is_safe_relative_subpath(g_workspace_reports_root)) {
+            std::cout << "[-] invalid workspace reports_root: " << g_workspace_reports_root << '\n';
+            ok = false;
+        }
+        if (!is_safe_relative_subpath(g_workspace_sessions_root)) {
+            std::cout << "[-] invalid workspace sessions_root: " << g_workspace_sessions_root << '\n';
+            ok = false;
+        }
+        if (!is_safe_relative_subpath(g_workspace_temp_root)) {
+            std::cout << "[-] invalid workspace temp_root: " << g_workspace_temp_root << '\n';
+            ok = false;
+        }
+
+        if (ok) {
+            std::cout << "[+] config verification passed.\n";
+        } else {
+            std::cout << "[-] config verification failed. review errors above.\n";
+        }
+        return ok;
+    }
+
+    std::cout << "Usage: verify <paths|config>\n";
+    return true;
+}
+
+bool ConsoleEngine::handle_show(const std::vector<std::string>& tokens) const {
+    if (tokens.size() < 2) {
+        std::cout << "Usage: show <modules|payloads|exploits|auxiliary|encoders|evasion|nops|transports|detection|analysis|lab|options|platforms|sessions|config>\n";
+        return true;
+    }
+
+    const std::string target = to_lower(tokens[1]);
+    if (target == "config") {
+        std::cout << "Config root: "
+                  << (config_root_.empty() ? "<not found>" : config_root_.generic_string()) << '\n';
+        std::cout << "Framework version: " << framework_version_ << '\n';
+        std::cout << "Safety mode: " << safety_mode_ << '\n';
+        std::cout << "Modules root: " << modules_root_ << '\n';
+        std::cout << "Workspace default: " << default_workspace_name_ << '\n';
+        std::cout << "Workspace active: " << active_workspace_ << '\n';
+        std::cout << "Workspace reports root: " << g_workspace_reports_root << '\n';
+        std::cout << "Workspace sessions root: " << g_workspace_sessions_root << '\n';
+        std::cout << "Workspace temp root: " << g_workspace_temp_root << '\n';
+        std::cout << "Logging level: " << logging_level_ << '\n';
+        std::cout << "Logging sinks:\n";
+        if (logging_sinks_.empty()) {
+            std::cout << "  <none>\n";
+        } else {
+            for (const std::string& sink : logging_sinks_) {
+                std::cout << "  " << sink << '\n';
+            }
+        }
+        return true;
+    }
+
     if (target == "modules") {
         print_module_table(modules_);
         return true;
@@ -2115,6 +2348,16 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
             return true;
         }
 
+        std::filesystem::path out_path = std::filesystem::path(
+            get_option_value(active_options_, global_options_, "EXTRACT_OUT")
+        );
+        if (!out_path.empty()) {
+            if (out_path.lexically_normal() == image_path.lexically_normal()) {
+                std::cout << "[-] EXTRACT_OUT cannot be the same as IMAGE.\n";
+                return true;
+            }
+        }
+
         const ImageExtractReport extract = image_engine.extract_simulation_code(image_path);
         if (!extract.success) {
             std::cout << "[-] extract failed: " << extract.message << '\n';
@@ -2124,14 +2367,7 @@ bool ConsoleEngine::handle_run_like(const std::string& action) {
         std::cout << "[+] extract complete: format=" << extract.format << '\n';
         std::cout << extract.simulation_code << '\n';
 
-        std::filesystem::path out_path = std::filesystem::path(
-            get_option_value(active_options_, global_options_, "EXTRACT_OUT")
-        );
         if (!out_path.empty()) {
-            if (out_path.lexically_normal() == image_path.lexically_normal()) {
-                std::cout << "[-] EXTRACT_OUT cannot be the same as IMAGE.\n";
-                return true;
-            }
             if (!verify_writable_output_file(out_path, "extract output file")) {
                 return true;
             }
@@ -2558,7 +2794,7 @@ std::string ConsoleEngine::prompt() const {
 void ConsoleEngine::print_help() const {
     std::cout
         << hdr("Core:") << '\n'
-        << "  help, banner, version, clear, history, explain [last|summary], verify paths, exit, quit\n"
+        << "  help, banner, version, clear, history, explain [last|summary], verify paths|config, exit, quit\n"
         << hdr("Workspace:") << '\n'
         << "  workspace list|add <name>|select <name>|delete <name>\n"
         << hdr("Tools policy:") << '\n'
@@ -2568,7 +2804,7 @@ void ConsoleEngine::print_help() const {
         << "  scope enforce <on|off>\n"
         << hdr("Discovery:") << '\n'
         << "  search <keyword>\n"
-        << "  show modules|payloads|exploits|auxiliary|encoders|evasion|nops|transports|detection|analysis|lab|platforms|options|sessions\n"
+        << "  show modules|payloads|exploits|auxiliary|encoders|evasion|nops|transports|detection|analysis|lab|platforms|options|sessions|config\n"
         << hdr("Module lifecycle:") << '\n'
         << "  use <module_id>, info, back, set <k> <v>, unset <k|all>, setg <k> <v>, unsetg <k|all>\n"
         << hdr("Execution workflow:") << '\n'
