@@ -1,4 +1,4 @@
-# PixelFerrite Framework
+# PixelFerrite-Framework
 
 PixelFerrite is a C++20, image-centric **security simulation framework** with:
 
